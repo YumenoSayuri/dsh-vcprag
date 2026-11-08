@@ -2366,19 +2366,15 @@ window.__ModuleLoader__.load({
       var sidebarRight = service('sidebarRight')
       var tabs = service('sidebarRightTabs')
 
-      // ---- 设置页入口 ----
-      // 右栏是主入口，但设置页这一份保留：右栏不可用、或用户把右栏关掉时，
-      // 它是唯一还能改配置的地方。
-      if (slots && typeof slots.inject === 'function' && typeof slots.register === 'function') {
-        disposers.push(slots.inject('settings.section', function () {
-          return slots.register(
-            { name: 'settings.section', id: 'vcprag', order: 70, label: '记忆召回' },
-            AppShell,
-          )
-        }))
-      } else {
-        console.warn('[vcprag] slots 服务不可用，设置页未挂载')
-      }
+      // ---- 不再注册 settings.section ----
+      //
+      // 0.3.x 时面板挂在「设置 → 插件 → 记忆召回」，0.4.0 起搬进了宿主原生
+      // 右侧栏。两个位置都挂着的话，同一个 AppShell 会渲染两遍 —— 用户在
+      // 设置页看到一整块和右栏一模一样的界面，分不清哪个才是真的。
+      //
+      // 所以这里只保留右栏一处入口（左侧栏按钮打开它）。右栏不可用时走
+      // 下面的兜底抽屉（shell.overlay），那条路渲染的也是同一个 AppShell，
+      // 配置能力一点不少。
 
       // ---- 注册成宿主原生右侧栏的一个 tab 类型 ----
       //

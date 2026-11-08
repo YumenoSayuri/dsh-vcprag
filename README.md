@@ -970,6 +970,28 @@ node migrate-mnemon.mjs <源目录> <目标日记目录>
 ## 版本历史
 
 ```
+0.4.2 (2026-11-08 22:55)
+```
+
+修两个 bug：设置页里残留的旧界面，以及**密钥存不住**。
+
+- **设置页里的旧入口没删干净**。0.4.0 把面板搬进宿主原生右栏，但 `settings.section` 的注册留着了 —— 同一个 `AppShell` 在「设置 → 插件 → 记忆召回」和右栏里各渲染一份，用户在设置页看到一整块和右栏一模一样的界面，分不清哪个才是真的。现在只保留右栏一处入口；右栏不可用时仍走兜底抽屉（`shell.overlay`），渲染的是同一个 `AppShell`，能力一点不少。
+- **密钥「重启就没了」，其实是下一次保存把它擦掉了**。`/settings/save` 落盘时用的是浅合并：
+
+  ```js
+  saveConfigOverlay(dataDir, { ...previous, ...overlay })
+  ```
+
+  而 `overlay.judge` 是整段替换 `previous.judge` 的。掩码机制本身没问题（`publicConfig` 把已配置的 key 回成 `••••••••`，保存时含圆点的值被 `isMaskedSecret` 跳过，这是对的 —— 否则保存任意设置都会把真 key 写成八个圆点）。但一旦跳过，这次 `overlay.judge` 里就没有 `apiKey` 字段，浅合并让整个 `judge` 段被替换 → key 静默消失。
+
+  用户体感是「jev 的 key 存不住，重启就没了」，实际是「第一次保存存进去了，第二次保存（哪怕只改了个无关数字）把它抹了」。`baseUrl` 之所以没事：它每次都和 `patch.yml` 的默认空串不同，所以每次都会重新进 delta。
+
+  修法是改用 `deepMerge(previous, overlay)`，掩码跳过的字段从上一版原样保留。`deepMerge` 从 `config.js` 导出（它本来就存在，只是没 export）。
+
+- **新增 `smoke-secret-persist.mjs`**：两连击 —— 先填 key 断言进 overlay，再模拟面板重载（draft 里 key 变成掩码）、只改一个无关数值，断言 key 仍在；最后按 `resolveConfig(mergeConfigOverlay(...))` 重放一遍「重启后读配置」。这条测试在修复前是红的。
+- **测试夹具同步**：`smoke-ui.mjs` 的断言从「必须注册 settings.section」反过来变成「不许注册」；`smoke-ui-settings.mjs` / `smoke-limit-input.mjs` 改成按槽位名取组件（原来靠 `slotsCalls[0]` 下标，入口一变就错位），并补上 `sidebarRightTabs` stub 让它们走右栏路径。
+
+```
 0.4.1 (2026-11-08 20:40)
 ```
 
