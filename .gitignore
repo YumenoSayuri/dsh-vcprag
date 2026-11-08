@@ -1,0 +1,31 @@
+# 依赖
+node_modules/
+
+# 测试产生的临时索引（体积大、可重建、与源码无关）。
+# 曾经差点把 5.5 MB 的 chunks.json + 4 MB 的 vectors.f32 推上去 ——
+# 它们是 test/ 下几个 smoke 跑出来的中间产物，谁 clone 都能自己生成。
+test/.tmp-*/
+test/*.tmp-index/
+test/.tmp-index/
+
+# 本地配置与个人路径：cordis.personal.yml 里是这台机器的日记目录，
+# 不该进公开仓库（换台机器毫无意义，还可能泄露目录结构）。
+# 部署模板是 cordis.patch.yml，那个要推。
+cordis.personal.yml
+
+# 临时诊断脚本（我排查 bug 时随手写的，不属于发布内容）
+_gitplan.mjs
+test/_diag-*.mjs
+test/_probe-*.mjs
+test/probe-*.mjs
+
+# 一次性排查脚本：每个都是一次 bug 的现场快照，里面写死了这台机器的
+# 绝对路径（C:/Users/Lenovo/...）和当时的索引布局，换个环境跑就是一堆
+# 假失败。留在本地能查历史，推上去只是噪音 + 泄露目录结构。
+# 长期有效的回归测试是 test/smoke-*.mjs，统一由 test/跑全部.mjs 驱动。
+test/diag-*.mjs
+
+# 运行期状态与日志
+*.log
+*.status.json
+*.local.json

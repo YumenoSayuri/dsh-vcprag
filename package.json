@@ -1,0 +1,55 @@
+{
+  "name": "@local/dsh-vcprag",
+  "version": "0.2.9",
+  "description": "DSH 记忆插件：jieba/1-gram 分词 + 向量混合检索，IDF 实词闸门（无关查询宁可不注入），三层注入（常驻 / 动态 / 工具按需），冻结策略保前缀缓存命中，四 Tab 管理面板",
+  "type": "module",
+  "main": "index.js",
+  "//optionalDependencies": "@node-rs/jieba 走 napi-rs 预编译（13 平台），装入失败会静默降级为 1-gram+2-gram，不影响插件启动。见 lib/tokenize.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./ui/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "ui",
+    "cordis.patch.yml",
+    "README.md",
+    "migrate-mnemon.mjs",
+    "rebuild-index.mjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "meta": {
+    "title": "记忆召回 (vcprag)",
+    "description": "BM25 + 向量混合检索，三层注入通道，冻结策略保前缀缓存命中，四 Tab 管理面板"
+  },
+  "optionalDependencies": {
+    "@node-rs/jieba": "^2.0.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "memory",
+    "rag",
+    "bm25",
+    "embedding"
+  ],
+  "author": "Nova & 辉宝主人",
+  "license": "MIT"
+}
