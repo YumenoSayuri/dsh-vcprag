@@ -215,375 +215,6 @@ window.__ModuleLoader__.load({
         ))
     }
 
-    // ================= Tab 1：记忆库 =================
-
-    function LibraryTab() {
-      var st = React.useState({ rows: [], total: 0, q: '', selected: null, doc: null, editing: false, draft: '', msg: null })
-      var s = st[0]
-      var set = st[1]
-
-      function merge(patch) {
-        set(function (prev) { return Object.assign({}, prev, patch) })
-      }
-
-      var load = React.useCallback(function (q) {
-        get('/library', { q: q }).then(function (r) {
-          if (r.ok) merge({ rows: r.rows, total: r.total })
-        })
-      }, [])
-
-      React.useEffect(function () { load('') }, [load])
-
-      function pick(row) {
-        get('/document', { docId: row.docId }).then(function (r) {
-          if (r.ok) merge({ selected: row.docId, doc: r, editing: false, draft: r.body, msg: null })
-        })
-      }
-
-      function save() {
-        if (!s.doc) return
-        merge({ msg: '保存中…' })
-        post('/document/save', { docId: s.doc.docId, body: s.draft }).then(function (r) {
-          if (r.ok) {
-            merge({
-              msg: '已保存，该篇索引已增量更新',
-              editing: false,
-              doc: Object.assign({}, s.doc, { body: s.draft }),
-            })
-            load(s.q)
-          } else {
-            merge({ msg: '保存失败：' + (r.error || '未知错误') })
-          }
-        })
-      }
-
-      var left = h('div', { style: { width: 300, flexShrink: 0 } },
-        h('input', {
-          style: S.input,
-          placeholder: '按标题过滤…',
-          value: s.q,
-          onChange: function (e) {
-            var q = e.target.value
-            merge({ q: q })
-            load(q)
-          },
-        }),
-        h('div', { style: { fontSize: 11, color: TOKEN.label2, margin: '8px 0' } },
-          '共 ' + s.total + ' 篇' + (s.q ? '，匹配 ' + s.rows.length + ' 篇' : '')),
-        h('div', { style: { maxHeight: 560, overflow: 'auto' } },
-          s.rows.map(function (row) {
-            return h('div', {
-              key: row.docId,
-              style: S.listItem(s.selected === row.docId),
-              onClick: function () { pick(row) },
-              title: row.filename,
-            },
-              h('div', { style: { fontSize: 12, lineHeight: '18px' } }, row.title || row.filename),
-              h('div', { style: { fontSize: 10, color: TOKEN.label2, marginTop: 2 } },
-                (row.date || '未知日期') + ' · ' + row.chunks + ' chunk'))
-          }))
-      )
-
-      var right
-      if (s.doc === null) {
-        right = h('div', { style: S.hint }, '← 从左侧选择一篇文档')
-      } else {
-        var meta = h('div', { style: S.card },
-          h('div', { style: { fontWeight: 600, marginBottom: 8 } }, s.doc.frontmatter.title || s.doc.filename),
-          h('div', { style: S.mono },
-            h('div', null, 'docId: ' + s.doc.docId),
-            h('div', null, 'file: ' + s.doc.relativePath),
-            h('div', null, 'created: ' + (s.doc.frontmatter.created_at || '—')),
-            h('div', null, 'updated: ' + (s.doc.frontmatter.updated_at || '—')),
-            h('div', null, 'revision: ' + (s.doc.frontmatter.revision || 1)),
-            h('div', null, 'size: ' + s.doc.sizeBytes + ' 字节')),
-          s.doc.frontmatter.description
-            ? h('div', { style: { marginTop: 8, fontSize: 12, color: TOKEN.label2, lineHeight: '19px' } },
-              s.doc.frontmatter.description)
-            : null
-        )
-
-        var actions = h('div', { style: { display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' } },
-          h('button', {
-            style: S.button(!s.editing),
-            onClick: function () {
-              merge({ editing: !s.editing, draft: s.doc.body })
-            },
-          }, s.editing ? '取消编辑' : '编辑正文'),
-          s.editing
-            ? h('button', { style: S.button(true), onClick: save }, '保存并重建该篇索引')
-            : null,
-          s.msg ? h('span', { style: { fontSize: 11, color: TOKEN.success } }, s.msg) : null
-        )
-
-        var bodyView = s.editing
-          ? h('textarea', {
-            style: Object.assign({}, S.input, { height: 460, resize: 'vertical', lineHeight: '19px' }),
-            value: s.draft,
-            onChange: function (e) {
-              merge({ draft: e.target.value })
-            },
-          })
-          : h('pre', { style: Object.assign({}, S.card, S.pre) }, s.doc.body)
-
-        right = h('div', { style: S.col }, meta, actions, bodyView)
-      }
-
-      return h('div', { style: S.row }, left, right)
-    }
-
-    // ================= Tab 2：召回调试 =================
-
-    function DebugTab() {
-      var st = React.useState({ q: '', only: 'both', limit: 10, result: null, busy: false, error: null })
-      var s = st[0]
-      var set = st[1]
-
-      function merge(patch) {
-        set(function (prev) { return Object.assign({}, prev, patch) })
-      }
-
-      function run() {
-        if (s.q.trim() === '') return
-        merge({ busy: true, error: null })
-        get('/recall', {
-          q: s.q,
-          limit: s.limit,
-          only: s.only === 'both' ? undefined : s.only,
-        }).then(function (r) {
-          merge({ busy: false, result: r.ok ? r : null, error: r.ok ? null : (r.error || '请求失败') })
-        })
-      }
-
-      var controls = h('div', { style: { display: 'flex', gap: 8, marginBottom: 10 } },
-        h('input', {
-          style: Object.assign({}, S.input, { flex: 1 }),
-          placeholder: '输入查询，回车执行…',
-          value: s.q,
-          onChange: function (e) { merge({ q: e.target.value }) },
-          onKeyDown: function (e) { if (e.key === 'Enter') run() },
-        }),
-        h('select', {
-          style: Object.assign({}, S.input, { width: 130, flexShrink: 0 }),
-          value: s.only,
-          onChange: function (e) { merge({ only: e.target.value }) },
-        },
-          h('option', { value: 'both' }, '混合召回'),
-          h('option', { value: 'lexical' }, '仅词法'),
-          h('option', { value: 'semantic' }, '仅向量')),
-        h('button', { style: S.button(true), onClick: run, disabled: s.busy },
-          s.busy ? '检索中…' : '检索')
-      )
-
-      if (s.error) {
-        return h('div', null, controls,
-          h('div', { style: Object.assign({}, S.card, { borderColor: TOKEN.error }) }, s.error))
-      }
-
-      if (s.result === null) {
-        return h('div', null, controls,
-          h('div', { style: S.hint },
-            '输入查询后回车。这里能看到「词法 / 向量 / 融合」三路分别的分数，以及 BM25 实际看到的 token，'
-            + '用来判断是哪一路在起作用、为什么某次召回是零命中。'))
-      }
-
-      var res = s.result
-      var t = res.timing
-
-      var stats = h('div', { style: Object.assign({}, S.card, { fontSize: 12 }) },
-        h('span', { style: S.badge('info') }, 'K=' + res.k),
-        h('span', { style: S.badge('muted') }, '词法 ' + t.lexicalCount + ' 条 / ' + t.lexicalMs + 'ms'),
-        h('span', { style: S.badge(t.semanticSkipped ? 'warn' : 'muted') },
-          '向量 ' + t.semanticCount + ' 条 / ' + t.semanticMs + 'ms'),
-        h('span', { style: S.badge('muted') }, '融合 ' + t.fusedCount + ' → 去重 ' + t.dedupedCount),
-        h('span', { style: S.badge('ok') }, '总 ' + t.totalMs + 'ms'),
-        t.semanticSkipped
-          ? h('div', { style: S.hint }, '向量通道未参与：' + t.semanticSkipped)
-          : null,
-        h('div', { style: { marginTop: 8 } },
-          h('span', { style: S.label },
-            'BM25 实际分出的 token（' + res.queryTokens.length + ' 个）——这就是为什么有时候会零命中'),
-          h('div', { style: Object.assign({}, S.mono, { marginTop: 4 }) },
-            res.queryTokens.slice(0, 100).join(' · ')))
-      )
-
-      if (res.hits.length === 0) {
-        return h('div', null, controls, stats,
-          h('div', { style: S.card }, '零命中。对照上方的分词结果，检查查询词是否与文档用词有字面重叠。'))
-      }
-
-      var hits = res.hits.map(function (hit, i) {
-        return h('div', { key: hit.chunkId, style: S.card },
-          h('div', { style: { display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 6 } },
-            h('span', { style: { fontWeight: 700, color: TOKEN.label2, minWidth: 26 } }, '#' + (i + 1)),
-            h('span', { style: { fontWeight: 600, flex: 1 } }, hit.title || hit.filename),
-            h('span', { style: S.badge('ok') }, '分 ' + hit.final)),
-          h('div', null,
-            h('span', { style: S.badge('muted') }, hit.date || '无日期'),
-            h('span', { style: S.badge('info') }, '词法 ' + hit.lexical),
-            h('span', { style: S.badge(hit.semantic === null ? 'muted' : 'info') },
-              '向量 ' + (hit.semantic === null ? '—' : hit.semantic)),
-            h('span', { style: S.badge('muted') }, 'RRF ' + hit.rrf),
-            hit.moreChunks > 0
-              ? h('span', { style: S.badge('warn') }, '同文档另 ' + hit.moreChunks + ' chunk（已折叠）')
-              : null),
-          hit.matched.length > 0
-            ? h('div', { style: Object.assign({}, S.mono, { fontSize: 11, margin: '6px 0' }) },
-              '命中 token：' + hit.matched.join(', '))
-            : null,
-          h('pre', { style: Object.assign({}, S.pre, { marginTop: 6 }) }, hit.excerpt + '…'))
-      })
-
-      return h('div', null, controls, stats, hits)
-    }
-
-    // ================= Tab 3：索引 =================
-
-    function IndexTab() {
-      var st = React.useState({ state: null, progress: null, verify: null, busy: false })
-      var s = st[0]
-      var set = st[1]
-      var timer = React.useRef(null)
-
-      function merge(patch) {
-        set(function (prev) { return Object.assign({}, prev, patch) })
-      }
-
-      function loadOnce() {
-        get('/state').then(function (r) {
-          if (r.ok) merge({ state: r })
-        })
-        get('/index/progress').then(function (r) {
-          if (!r.ok) return
-          merge({ progress: r })
-          if (r.building) {
-            if (timer.current) clearTimeout(timer.current)
-            timer.current = setTimeout(loadOnce, 1200)
-          }
-        })
-      }
-
-      React.useEffect(function () {
-        loadOnce()
-        return function () { if (timer.current) clearTimeout(timer.current) }
-      }, [])
-
-      function rebuild(force) {
-        merge({ busy: true })
-        post('/index/rebuild', { force: force === true }).then(function (r) {
-          merge({ busy: false })
-          if (r.requiresConfirm) {
-            var ok = window.confirm(
-              (r.message || '索引配置不兼容') + '\n\n' + (r.hint || '') + '\n\n仍然重建？'
-            )
-            if (ok) rebuild(true)
-            return
-          }
-          if (r.ok) {
-            setTimeout(loadOnce, 400)
-          } else {
-            window.alert('重建失败：' + (r.error || '未知'))
-          }
-        })
-      }
-
-      function verify() {
-        merge({ busy: true })
-        post('/index/verify', {}).then(function (r) {
-          merge({ busy: false, verify: r.verify || r })
-        })
-      }
-
-      if (s.state === null) return h('div', { style: S.hint }, '加载中…')
-
-      var idx = s.state.index
-      var prog = s.progress && s.progress.status
-      var building = s.progress && s.progress.building
-
-      var tone = idx.hybridReady ? 'ok' : (idx.compatible.fatal ? 'err' : 'warn')
-      var text = idx.hybridReady
-        ? '可用（混合召回）'
-        : idx.vectorsIndexed
-          ? '向量已索引但查询侧不可用 → 仅关键词'
-          : '仅关键词召回'
-
-      var statusCard = h('div', { style: S.card },
-        h('div', { style: { marginBottom: 10 } },
-          h('span', { style: S.badge(tone) }, text),
-          idx.compatible.ok ? null : h('span', { style: S.badge('warn') }, idx.compatible.reason || '')),
-        h('div', { style: S.mono },
-          h('div', null, '文档 ' + idx.docCount + ' 篇 · chunk ' + idx.chunkCount + ' · 已向量化 ' + idx.vectorized),
-          h('div', null, '维度 ' + (idx.embedding ? idx.embedding.dimensions : '—') +
-            ' · 模型 ' + (idx.embedding ? idx.embedding.model : '—')),
-          h('div', null, '分块 ' + idx.chunkSize + ' / 重叠 ' + idx.chunkOverlap),
-          h('div', null, '建立于 ' + (idx.builtAt || '尚未建立')),
-          h('div', null, 'BM25 ' + idx.bm25.docCount + ' 文档 / ' + idx.bm25.vocabularySize + ' 词表'),
-          h('div', null, '索引目录 ' + idx.indexDir)),
-        idx.compatible.ok
-          ? null
-          : h('div', {
-            style: {
-              marginTop: 10,
-              padding: 8,
-              background: 'rgba(248, 81, 73, 0.16)',
-              borderRadius: 6,
-              fontSize: 12,
-              lineHeight: '20px',
-              whiteSpace: 'pre-wrap',
-              color: TOKEN.error,
-            },
-          }, idx.compatible.message)
-      )
-
-      var buttons = h('div', { style: { display: 'flex', gap: 8, marginBottom: 12 } },
-        h('button', { style: S.button(true), onClick: function () { rebuild(false) }, disabled: s.busy || building },
-          building ? '构建中…' : '重建全量索引'),
-        h('button', { style: S.button(false), onClick: verify, disabled: s.busy || building }, '校验完整性'),
-        h('button', { style: S.button(false), onClick: loadOnce }, '刷新')
-      )
-
-      var progressCard = null
-      if (building && prog) {
-        progressCard = h('div', { style: S.card },
-          h('div', { style: { marginBottom: 6, fontSize: 12 } },
-            prog.message + '　' + prog.doneBatches + '/' + prog.totalBatches + ' 批'),
-          h('div', { style: { height: 6, background: TOKEN.surface2, borderRadius: 3, overflow: 'hidden' } },
-            h('div', {
-              style: {
-                height: '100%',
-                width: Math.max(2, prog.progress) + '%',
-                background: TOKEN.brand,
-                transition: 'width 0.3s',
-              },
-            })),
-          h('div', { style: S.hint }, '构建期间召回降级为纯关键词，对话不受影响。'))
-      }
-
-      var verifyCard = null
-      if (s.verify) {
-        var samples = s.verify.error
-          ? h('div', { style: { color: TOKEN.error } }, s.verify.error)
-          : (s.verify.samples || []).map(function (row) {
-            return h('div', { key: row.chunkId, style: Object.assign({}, S.mono, { marginBottom: 3 }) },
-              (row.similarity >= 0.999 ? '✓ ' : '✗ ') + row.similarity + '  ' +
-              (row.title || row.chunkId) + (row.error ? '  [' + row.error + ']' : ''))
-          })
-
-        verifyCard = h('div', { style: S.card },
-          h('div', { style: { marginBottom: 8 } },
-            h('span', { style: S.badge(s.verify.ok ? 'ok' : 'err') },
-              s.verify.ok ? '完整性通过' : '完整性异常'),
-            s.verify.worst !== undefined
-              ? h('span', { style: S.badge('muted') }, '最差相似度 ' + s.verify.worst)
-              : null),
-          samples,
-          h('div', { style: S.hint },
-            '抽查 5 个 chunk 重新 embed 并与磁盘向量比对。低于 0.999 说明配置不一致或索引损坏。'))
-      }
-
-      return h('div', null, statusCard, buttons, progressCard, verifyCard)
-    }
-
     // ================= Tab 4：设置 =================
 
     function SettingsTab() {
@@ -1755,111 +1386,1099 @@ window.__ModuleLoader__.load({
         }))
     }
 
-    // ================= 顶栏状态条 =================
+    // ================= 页 1：记忆库 =================
+    //
+    // 原来的 LibraryTab 是「左列表 300px + 右详情」的主从分栏。窄面板下那套
+    // 会挤成两条窄缝，所以改成单栏行列表：点一行原地展开，不跳转、不分栏。
 
-    function StatusBar() {
-      var st = React.useState(null)
-      var s = st[0]
-      var set = st[1]
+    function LibraryPage() {
+      var state = React.useState({ rows: [], total: 0, q: '', open: null, doc: null, editing: false, draft: '', msg: null })
+      var s = state[0]
+      var set = state[1]
+
+      function merge(patch) {
+        set(function (prev) { return Object.assign({}, prev, patch) })
+      }
+
+      var load = React.useCallback(function (q) {
+        get('/library', { q: q }).then(function (r) {
+          if (r.ok) merge({ rows: r.rows, total: r.total })
+        })
+      }, [])
+
+      React.useEffect(function () { load('') }, [load])
+
+      function toggle(row) {
+        if (s.open === row.docId) {
+          merge({ open: null, doc: null, editing: false, msg: null })
+          return
+        }
+        get('/document', { docId: row.docId }).then(function (r) {
+          if (r.ok) merge({ open: row.docId, doc: r, editing: false, draft: r.body, msg: null })
+        })
+      }
+
+      function save() {
+        if (s.doc === null) return
+        merge({ msg: '保存中…' })
+        post('/document/save', { docId: s.doc.docId, body: s.draft }).then(function (r) {
+          if (r.ok) {
+            merge({
+              msg: '已保存，该篇索引已增量更新',
+              editing: false,
+              doc: Object.assign({}, s.doc, { body: s.draft }),
+            })
+            load(s.q)
+          } else {
+            merge({ msg: '保存失败：' + (r.error || '未知错误') })
+          }
+        })
+      }
+
+      var rows = s.rows.map(function (row) {
+        var isOpen = s.open === row.docId
+        var doc = isOpen ? s.doc : null
+
+        var more = null
+        if (isOpen && doc !== null) {
+          more = h('div', { className: 'vcp-mem-more' },
+            h('div', { className: 'vcp-more' },
+              s.editing
+                ? h('textarea', {
+                  className: 'vcp-field',
+                  style: { width: '100%', height: 360, lineHeight: '19px', resize: 'vertical' },
+                  value: s.draft,
+                  onChange: function (e) { merge({ draft: e.target.value }) },
+                })
+                : h('p', { style: { whiteSpace: 'pre-wrap', margin: 0 } }, doc.body),
+              h('div', { className: 'vcp-acts' },
+                h('button', {
+                  className: 'vcp-btn',
+                  onClick: function (e) {
+                    e.stopPropagation()
+                    merge({ editing: !s.editing, draft: doc.body })
+                  },
+                }, s.editing ? '取消编辑' : '编辑正文'),
+                s.editing
+                  ? h('button', {
+                    className: 'vcp-btn pri',
+                    onClick: function (e) { e.stopPropagation(); save() },
+                  }, '保存并重建该篇索引')
+                  : null,
+                s.msg ? h('span', {
+                  style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' },
+                }, s.msg) : null)))
+        }
+
+        return h('article', {
+          key: row.docId,
+          className: 'vcp-mem',
+          'data-open': isOpen ? '1' : undefined,
+          onClick: function () { toggle(row) },
+        },
+          h('div', { className: 'vcp-mem-h' },
+            h('h4', null, row.title || row.filename),
+            h('time', null, row.date || '无日期')),
+          h('p', { className: 'vcp-mem-ex' }, row.description || row.filename),
+          h('div', { className: 'vcp-mem-meta' },
+            h('span', null, row.chunks + ' 块'),
+            doc !== null && doc.frontmatter ? h('span', null, doc.frontmatter.title ? '有标题' : '无标题') : null,
+            h('span', null, isOpen ? '收起' : '展开')),
+          more)
+      })
+
+      var sides = h('aside', null,
+        h('div', { className: 'vcp-card' },
+          h('p', { className: 'vcp-card-t' }, '语料概况'),
+          h('div', { className: 'vcp-kv' }, h('span', null, '匹配'), h('b', null, s.rows.length + ' 篇')),
+          h('div', { className: 'vcp-kv' }, h('span', null, '全部'), h('b', null, s.total + ' 篇')),
+          h('div', { className: 'vcp-kv' }, h('span', null, '展开'), h('b', null, s.open === null ? '—' : '1 篇'))))
+
+      return h('div', null,
+        h(PageHead, {
+          eyebrow: '语料',
+          title: '记忆库',
+          sub: '这里每一行都是一条可被召回的记忆。点开能读原文、改正文，保存后该篇索引会增量更新。',
+          actions: [
+            h('input', {
+              key: 'q',
+              className: 'vcp-btn',
+              style: { flex: '1 1 200px', minWidth: 0, fontWeight: 400, textAlign: 'left' },
+              placeholder: '按标题过滤…',
+              value: s.q,
+              onChange: function (e) {
+                var q = e.target.value
+                merge({ q: q })
+                load(q)
+              },
+            }),
+          ],
+        }),
+        h('div', { className: 'vcp-cols' },
+          h('div', null,
+            h('div', { className: 'vcp-sect' },
+              h('h3', null, '记忆条目'),
+              h('span', { className: 'meta' }, s.q ? '匹配 ' + s.rows.length + ' 篇' : '共 ' + s.total + ' 篇')),
+            rows.length === 0
+              ? h('div', { className: 'vcp-card' }, '没有匹配的条目。换个关键词，或去索引页重新扫描目录。')
+              : rows),
+          sides))
+    }
+
+    // ================= 页 2：召回调试 =================
+
+    function RecallPage() {
+      var state = React.useState({ q: '', only: 'both', limit: 10, result: null, busy: false, error: null })
+      var s = state[0]
+      var set = state[1]
+
+      function merge(patch) {
+        set(function (prev) { return Object.assign({}, prev, patch) })
+      }
+
+      function run() {
+        if (s.q.trim() === '') return
+        merge({ busy: true, error: null })
+        get('/recall', {
+          q: s.q,
+          limit: s.limit,
+          only: s.only === 'both' ? undefined : s.only,
+        }).then(function (r) {
+          merge({ busy: false, result: r.ok ? r : null, error: r.ok ? null : (r.error || '请求失败') })
+        })
+      }
+
+      var search = h('div', { className: 'vcp-search' },
+        h('input', {
+          placeholder: '输入查询，回车执行…',
+          value: s.q,
+          onChange: function (e) { merge({ q: e.target.value }) },
+          onKeyDown: function (e) { if (e.key === 'Enter') run() },
+        }),
+        h('button', { className: 'vcp-btn pri', onClick: run, disabled: s.busy },
+          s.busy ? '检索中…' : '召回'))
+
+      var body = null
+      if (s.error !== null) {
+        body = h('div', { className: 'vcp-card' }, s.error)
+      } else if (s.result === null) {
+        body = h('div', { className: 'vcp-card' },
+          '输入查询后回车。这里能看到「词法 / 向量 / 融合」三路分别的分数，以及 BM25 实际看到的 token，'
+          + '用来判断是哪一路在起作用、为什么某次召回是零命中。')
+      } else {
+        var res = s.result
+        var t = res.timing
+        var stat = h('div', { className: 'vcp-card' },
+          h('p', { className: 'vcp-card-t' }, '本次召回'),
+          h('div', { className: 'vcp-kv' }, h('span', null, 'K'), h('b', null, res.k)),
+          h('div', { className: 'vcp-kv' }, h('span', null, '词法'), h('b', null, t.lexicalCount + ' 条 / ' + t.lexicalMs + 'ms')),
+          h('div', { className: 'vcp-kv' }, h('span', null, '向量'), h('b', null, t.semanticSkipped ? '未参与' : (t.semanticCount + ' 条 / ' + t.semanticMs + 'ms'))),
+          h('div', { className: 'vcp-kv' }, h('span', null, '融合'), h('b', null, t.fusedCount + ' → 去重 ' + t.dedupedCount)),
+          h('div', { className: 'vcp-kv' }, h('span', null, '耗时'), h('b', null, t.totalMs + 'ms')),
+          t.semanticSkipped
+            ? h('p', { style: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.75, color: 'var(--dsw-alias-label-tertiary)' } },
+              '向量通道未参与：' + t.semanticSkipped)
+            : null)
+
+        var tokenCard = h('div', { className: 'vcp-card' },
+          h('p', { className: 'vcp-card-t' }, 'BM25 token（' + res.queryTokens.length + '）'),
+          h('div', { style: { fontSize: 11.5, lineHeight: 1.9, wordBreak: 'break-all', color: 'var(--dsw-alias-label-secondary)' } },
+            res.queryTokens.slice(0, 100).join(' · ')),
+          h('p', { style: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.75, color: 'var(--dsw-alias-label-tertiary)' } },
+            '零命中时先看这里：查询词与文档用词若没有字面重叠，纯词法路就是空的。'))
+
+        var hits = res.hits.length === 0
+          ? h('div', { className: 'vcp-card' }, '零命中。对照上方的分词结果，检查查询词是否与文档用词有字面重叠。')
+          : h('div', null, res.hits.map(function (hit, i) {
+            return h('article', { key: hit.chunkId, className: 'vcp-hit' },
+              h('div', { className: 'vcp-hit-top' },
+                h('span', { className: 'vcp-rank' }, String(i + 1).padStart(2, '0')),
+                h('h4', null, hit.title || hit.filename),
+                h('span', { className: 'vcp-score' }, String(hit.final))),
+              h('p', null, hit.excerpt + '…'),
+              h('div', { className: 'vcp-scores' },
+                h('span', null, '词法 ', h('em', null, String(hit.lexical))),
+                h('span', null, '向量 ', h('em', null, hit.semantic === null ? '—' : String(hit.semantic))),
+                h('span', null, 'RRF ', h('em', null, String(hit.rrf))),
+                hit.moreChunks > 0
+                  ? h('span', null, '同文档另 ', h('em', null, hit.moreChunks + ' 块（已折叠）'))
+                  : null,
+                hit.matched.length > 0
+                  ? h('span', null, '命中 ', h('em', null, hit.matched.join(', ')))
+                  : null))
+          }))
+
+        body = h('div', { className: 'vcp-cols' },
+          h('div', null,
+            h('div', { className: 'vcp-sect' },
+              h('h3', null, '命中 ' + res.hits.length + ' 条'),
+              h('span', { className: 'meta' }, '上限 ' + res.k)),
+            hits),
+          h('aside', null, stat, tokenCard))
+      }
+
+      return h('div', null,
+        h(PageHead, {
+          eyebrow: '调试',
+          title: '召回调试',
+          sub: '用一句话问它，看它翻出什么、每块分别得了多少分。分数不对时，问题通常出在权重或分块粒度上。',
+        }),
+        search,
+        body)
+    }
+
+    // ================= 页 3：索引 =================
+
+    function IndexPage() {
+      var state = React.useState({ state: null, progress: null, verify: null, busy: false })
+      var s = state[0]
+      var set = state[1]
+      var timer = React.useRef(null)
+
+      function merge(patch) {
+        set(function (prev) { return Object.assign({}, prev, patch) })
+      }
+
+      function loadOnce() {
+        get('/state').then(function (r) {
+          if (r.ok) merge({ state: r })
+        })
+        get('/index/progress').then(function (r) {
+          if (!r.ok) return
+          merge({ progress: r })
+          if (r.building) {
+            if (timer.current) clearTimeout(timer.current)
+            timer.current = setTimeout(loadOnce, 1200)
+          }
+        })
+      }
+
+      React.useEffect(function () {
+        loadOnce()
+        return function () { if (timer.current) clearTimeout(timer.current) }
+      }, [])
+
+      function rebuild(force) {
+        merge({ busy: true })
+        post('/index/rebuild', { force: force === true }).then(function (r) {
+          merge({ busy: false })
+          if (r.requiresConfirm) {
+            var ok = window.confirm(
+              (r.message || '索引配置不兼容') + '\n\n' + (r.hint || '') + '\n\n仍然重建？'
+            )
+            if (ok) rebuild(true)
+            return
+          }
+          if (r.ok) setTimeout(loadOnce, 400)
+          else window.alert('重建失败：' + (r.error || '未知'))
+        })
+      }
+
+      function verify() {
+        merge({ busy: true })
+        post('/index/verify', {}).then(function (r) {
+          merge({ busy: false, verify: r.verify || r })
+        })
+      }
+
+      if (s.state === null) {
+        return h('div', null,
+          h(PageHead, { eyebrow: '索引', title: '索引' }),
+          h('div', { className: 'vcp-card' }, '加载中…'))
+      }
+
+      var idx = s.state.index
+      var prog = s.progress && s.progress.status
+      var building = s.progress && s.progress.building
+
+      var band = h('div', { className: 'vcp-band' },
+        h('div', { className: 'vcp-stat' },
+          h('b', null, String(idx.chunkCount)),
+          h('span', null, '已索引分块'),
+          h('span', { className: 'tag' }, idx.hybridReady ? '● 已同步' : '● 仅关键词')),
+        h('div', { className: 'vcp-stat' },
+          h('b', null, String(idx.vectorized)),
+          h('span', null, '已向量化')),
+        h('div', { className: 'vcp-stat' },
+          h('b', null, idx.embedding ? String(idx.embedding.dimensions) : '—'),
+          h('span', null, '向量维数')),
+        h('div', { className: 'vcp-stat' },
+          h('b', null, String(idx.bm25.vocabularySize)),
+          h('span', null, '词表大小')))
+
+      var detail = h('div', null,
+        h('div', { className: 'vcp-dir' },
+          h('span', { className: 'nm' }, '文档'),
+          h('span', { className: 'pt' }, idx.indexDir),
+          h('span', { className: 'n1' }, String(idx.docCount) + ' 篇'),
+          h('span', { className: 'n2' }, String(idx.vectorized) + ' 块')),
+        h('div', { className: 'vcp-dir' },
+          h('span', { className: 'nm' }, '模型'),
+          h('span', { className: 'pt' }, idx.embedding ? idx.embedding.model : '—'),
+          h('span', { className: 'n1' }, ''),
+          h('span', { className: 'n2' }, idx.embedding ? String(idx.embedding.dimensions) + 'd' : '—')),
+        h('div', { className: 'vcp-dir' },
+          h('span', { className: 'nm' }, '分块'),
+          h('span', { className: 'pt' }, idx.chunkSize + ' / 重叠 ' + idx.chunkOverlap),
+          h('span', { className: 'n1' }, ''),
+          h('span', { className: 'n2' }, '')),
+        h('div', { className: 'vcp-dir' },
+          h('span', { className: 'nm' }, 'BM25'),
+          h('span', { className: 'pt' }, idx.bm25.docCount + ' 文档'),
+          h('span', { className: 'n1' }, ''),
+          h('span', { className: 'n2' }, idx.bm25.vocabularySize + ' 词')),
+        h('div', { className: 'vcp-dir' },
+          h('span', { className: 'nm' }, '建立于'),
+          h('span', { className: 'pt' }, idx.builtAt || '尚未建立'),
+          h('span', { className: 'n1' }, ''),
+          h('span', { className: 'n2' }, '')))
+
+      var progress = null
+      if (building && prog) {
+        progress = h('div', { className: 'vcp-card' },
+          h('p', { className: 'vcp-card-t' }, '正在重建'),
+          h('div', { className: 'vcp-bar-lab' },
+            h('span', null, prog.message),
+            h('b', null, prog.doneBatches + '/' + prog.totalBatches + ' 批')),
+          h('div', { className: 'vcp-track' },
+            h('i', { style: { width: Math.max(2, prog.progress) + '%' } })),
+          h('p', { style: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.75, color: 'var(--dsw-alias-label-tertiary)' } },
+            '构建期间召回降级为纯关键词，对话不受影响。'))
+      }
+
+      var verifyCard = null
+      if (s.verify !== null) {
+        var samples = s.verify.error
+          ? h('p', { style: { margin: 0, fontSize: 12 } }, s.verify.error)
+          : h('div', { style: { fontSize: 11, lineHeight: 1.9 } },
+            (s.verify.samples || []).map(function (row) {
+              return h('div', { key: row.chunkId },
+                (row.similarity >= 0.999 ? '✓ ' : '✗ ') + row.similarity + '  ' +
+                (row.title || row.chunkId) + (row.error ? '  [' + row.error + ']' : ''))
+            }))
+        verifyCard = h('div', { className: 'vcp-card' },
+          h('p', { className: 'vcp-card-t' }, s.verify.ok ? '完整性通过' : '完整性异常'),
+          samples,
+          h('p', { style: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.75, color: 'var(--dsw-alias-label-tertiary)' } },
+            '抽查 5 个 chunk 重新 embed 并与磁盘向量比对。低于 0.999 说明配置不一致或索引损坏。'))
+      }
+
+      var warn = idx.compatible && idx.compatible.ok === false
+        ? h('div', { className: 'vcp-card', style: { borderColor: 'var(--dsw-alias-state-error-primary)' } },
+          h('p', { className: 'vcp-card-t' }, '配置不兼容'),
+          h('p', { style: { margin: 0, fontSize: 12, lineHeight: 1.8, whiteSpace: 'pre-wrap' } },
+            (idx.compatible.reason || '') + '\n' + (idx.compatible.message || '')))
+        : null
+
+      return h('div', null,
+        h(PageHead, {
+          eyebrow: '索引',
+          title: '索引',
+          sub: '重建是全量重算嵌入；校验只比对元数据，几秒就能跑完。换过嵌入模型之后必须重建，否则新旧向量不在同一空间。',
+          actions: [
+            h('button', {
+              key: 'r', className: 'vcp-btn pri',
+              onClick: function () { rebuild(false) }, disabled: s.busy || building,
+            }, building ? '构建中…' : '重建索引'),
+            h('button', {
+              key: 'v', className: 'vcp-btn',
+              onClick: verify, disabled: s.busy || building,
+            }, '校验一致性'),
+            h('button', { key: 'f', className: 'vcp-btn quiet', onClick: loadOnce }, '刷新'),
+          ],
+        }),
+        band,
+        warn,
+        h('div', { className: 'vcp-sect' }, h('h3', null, '明细'), h('span', { className: 'meta' }, '')),
+        detail,
+        progress,
+        verifyCard)
+    }
+
+    // 设置页：内容逻辑沿用原 SettingsTab（字段太多且都有真实端点），
+    // 这里只加页头，让它和其它三页共用同一骨架。
+    function SettingsPage() {
+      return h('div', null,
+        h(PageHead, {
+          eyebrow: '设置',
+          title: '设置',
+          sub: '这些决定它去哪里找东西、怎么算相似度。改动立刻生效；要让旧分块用上新模型，还得去索引页重建。',
+        }),
+        h(SettingsTab, null))
+    }
+
+    // ================= 新外壳：左导航 + 分页 =================
+    //
+    // 容器查询（@container）内联 style 表达不了，所以和宿主自己的
+    // @deepseek-ai/dsh-client-ui-sidebar-browser 一样注入一个 <style> 标签。
+    // 全部颜色走 --dsw-* 语义 token，深浅色自动跟随宿主，不写字面色值。
+
+    var CSS_TAG = 'vcprag/panel.css'
+    /** 右栏 tab 的 kind 与注册 id，两处必须是同一个值。 */
+    var KIND = 'vcprag'
+
+    function cssText() {
+      return [
+        // 只负责当容器查询的参照物。宽度/高度必须钉死，否则它会跟着内容长。
+        '.vcp-app{container-type:inline-size;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13.5px;line-height:1.75;box-sizing:border-box}',
+        // 真正的网格。容器查询的规则全部落在这一层 —— 它是 .vcp-app 的后代。
+        '.vcp-split{display:grid;grid-template-columns:236px minmax(0,1fr);height:100%;min-height:0;width:100%;overflow:hidden}',
+        '.vcp-rail{display:flex;flex-direction:column;min-width:0;padding:26px 12px 14px;background:var(--dsw-alias-bg-layer-1);border-right:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-brand{padding:0 10px 24px;min-width:0}',
+        '.vcp-brand h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.05em;line-height:1.4}',
+        '.vcp-brand p{margin:5px 0 0;font-size:10px;letter-spacing:.1em;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-nav{display:flex;flex-direction:column;gap:2px}',
+        '.vcp-item{display:flex;align-items:center;gap:11px;padding:10px 11px;border:0;border-radius:6px;background:none;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;text-align:left;cursor:pointer;min-width:0;transition:background .11s ease,color .11s ease}',
+        '.vcp-item:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+        '.vcp-item:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}',
+        '.vcp-item[aria-current="page"]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600}',
+        '.vcp-item svg{flex:0 0 16px;width:16px;height:16px;opacity:.75}',
+        '.vcp-item[aria-current="page"] svg{opacity:1;color:var(--dsw-alias-brand-primary)}',
+        '.vcp-item .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.vcp-item .num{margin-left:auto;font-size:10px;font-weight:400;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-foot{margin-top:auto;padding-top:13px;border-top:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-status{font-size:10px;line-height:1.95;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden}',
+        '.vcp-status b{font-weight:400;color:var(--dsw-alias-state-success-primary)}',
+        '.vcp-main{overflow-y:auto;overflow-x:hidden;min-width:0;height:100%}',
+        '.vcp-wrap{max-width:1020px;margin:0 auto;padding:42px 46px 88px}',
+        '.vcp-page{display:none}',
+        '.vcp-page[data-active="true"]{display:block}',
+        '.vcp-he{margin:0 0 40px;max-width:72ch}',
+        '.vcp-eb{margin:0 0 11px;font-size:10px;letter-spacing:.19em;text-transform:uppercase;color:var(--dsw-alias-brand-primary)}',
+        '.vcp-he h2{margin:0;font-size:28px;font-weight:600;letter-spacing:-.005em;line-height:1.32}',
+        '.vcp-he .vcp-sub{margin:13px 0 0;font-size:13px;line-height:1.85;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-acts{margin-top:22px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}',
+        '.vcp-btn{font:inherit;font-size:12.5px;line-height:1;padding:9px 16px;cursor:pointer;border-radius:6px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
+        '.vcp-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+        '.vcp-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}',
+        '.vcp-btn:disabled{opacity:.5;cursor:default}',
+        '.vcp-btn.pri{background:var(--dsw-alias-brand-primary);border-color:transparent;color:var(--dsw-alias-label-inverse,#fff);font-weight:600}',
+        '.vcp-btn.quiet{background:none;border-color:transparent;color:var(--dsw-alias-label-secondary);padding:9px 10px}',
+        '.vcp-btn.quiet:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+        '.vcp-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:40px;align-items:start}',
+        '.vcp-sect{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 16px}',
+        '.vcp-sect h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.02em}',
+        '.vcp-sect .meta{font-size:10.5px;color:var(--dsw-alias-label-tertiary);text-align:right}',
+        '.vcp-card{background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l2);border-radius:10px;padding:20px 18px}',
+        '.vcp-card + .vcp-card{margin-top:16px}',
+        '.vcp-card-t{margin:0 0 14px;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-bar{margin-bottom:14px}',
+        '.vcp-bar:last-child{margin-bottom:0}',
+        '.vcp-bar-lab{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;color:var(--dsw-alias-label-secondary);margin-bottom:6px}',
+        '.vcp-bar-lab b{font-size:10.5px;font-weight:400;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
+        '.vcp-track{height:5px;border-radius:3px;overflow:hidden;background:var(--dsw-alias-bg-layer-2)}',
+        '.vcp-track i{display:block;height:100%;border-radius:3px;background:var(--dsw-alias-brand-primary)}',
+        '.vcp-kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;font-size:12px;border-bottom:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-kv:last-child{border-bottom:0;padding-bottom:0}',
+        '.vcp-kv span{color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
+        '.vcp-kv b{font-weight:400;color:var(--dsw-alias-label-secondary);text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}',
+        '.vcp-mem{padding:20px 0;border-bottom:.5px solid var(--dsw-alias-border-l3);cursor:pointer}',
+        '.vcp-mem:first-of-type{border-top:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-mem-h{display:flex;align-items:baseline;gap:12px}',
+        '.vcp-mem-h h4{margin:0;font-size:13.5px;font-weight:600;line-height:1.55;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+        '.vcp-mem-h time{margin-left:auto;flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
+        '.vcp-mem-ex{margin:8px 0 0;font-size:12.5px;line-height:1.85;max-width:72ch;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-mem-meta{margin:10px 0 0;display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-mem-more{display:none}',
+        '.vcp-mem[data-open="1"] .vcp-mem-more{display:block;margin-top:15px}',
+        '.vcp-mem[data-open="1"] .vcp-mem-h h4{color:var(--dsw-alias-brand-primary);white-space:normal}',
+        '.vcp-more{background:var(--dsw-alias-bg-layer-2);border-radius:8px;padding:16px 18px}',
+        '.vcp-more p{margin:0 0 12px;font-size:12.5px;line-height:1.85;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-more p:last-of-type{margin-bottom:0}',
+        '.vcp-search{display:flex;gap:9px;margin:0 0 32px;flex-wrap:wrap}',
+        '.vcp-search input{flex:1 1 220px;min-width:0;font:inherit;font-size:13.5px;padding:13px 16px;border-radius:8px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}',
+        '.vcp-search input::placeholder{color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-search input:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}',
+        '.vcp-hit{padding:18px 0;border-bottom:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-hit:first-of-type{border-top:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-hit-top{display:flex;align-items:baseline;gap:11px}',
+        '.vcp-rank{flex:0 0 16px;font-size:10.5px;color:var(--dsw-alias-brand-primary)}',
+        '.vcp-hit-top h4{margin:0;font-size:13px;font-weight:600;min-width:0}',
+        '.vcp-score{margin-left:auto;flex:0 0 auto;font-size:12px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-hit p{margin:7px 0 0 27px;font-size:12.5px;line-height:1.85;max-width:68ch;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-scores{margin:9px 0 0 27px;display:flex;gap:18px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-scores em{font-style:normal;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-band{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--dsw-alias-border-l3);border:.5px solid var(--dsw-alias-border-l2);border-radius:10px;overflow:hidden;margin:0 0 38px}',
+        '.vcp-stat{background:var(--dsw-alias-bg-layer-1);padding:20px 18px;min-width:0}',
+        '.vcp-stat b{display:block;font-size:25px;font-weight:600;letter-spacing:-.025em;line-height:1.15;font-variant-numeric:tabular-nums}',
+        '.vcp-stat span{display:block;margin-top:7px;font-size:11px;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-stat .tag{display:inline-block;margin-top:9px;padding:2px 8px;border-radius:20px;font-size:10px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-success-primary)}',
+        '.vcp-dir{padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l3);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}',
+        '.vcp-dir:first-of-type{border-top:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-dir .nm{font-size:12.5px;flex:1 1 120px;min-width:0}',
+        '.vcp-dir .pt{font-size:10.5px;color:var(--dsw-alias-label-tertiary);word-break:break-all}',
+        '.vcp-dir .n1{font-size:11px;margin-left:auto;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-dir .n2{font-size:11px;min-width:52px;text-align:right;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-form{margin:0 0 40px}',
+        '.vcp-form > h3{margin:0 0 7px;font-size:14px;font-weight:600}',
+        '.vcp-form > .hint{margin:0 0 22px;font-size:12px;line-height:1.8;max-width:66ch;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-field{margin:0 0 22px;max-width:500px}',
+        '.vcp-field > label{display:block;font-size:12px;font-weight:600;margin-bottom:7px}',
+        '.vcp-field > .desc{display:block;margin:0 0 8px;font-size:11.5px;line-height:1.75;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-field input,.vcp-field select,.vcp-field textarea{width:100%;font:inherit;font-size:12.5px;padding:10px 12px;border-radius:6px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);box-sizing:border-box}',
+        '.vcp-field input:focus,.vcp-field select:focus,.vcp-field textarea:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}',
+        // 820 以下：侧栏收成纯图标（不占文字宽度），正文让出来。
+        // 这是用户说的「窄度压过文字就直接隐藏文字只显示图标」那一档。
+        '@container (max-width:819px){.vcp-split{grid-template-columns:56px minmax(0,1fr)}.vcp-rail{padding:20px 6px 12px;align-items:center}.vcp-brand{display:none}.vcp-item{justify-content:center;padding:11px 0;width:100%;gap:0}.vcp-item .lbl,.vcp-item .num{display:none}.vcp-foot{display:none}.vcp-wrap{padding:32px 24px 72px}.vcp-he h2{font-size:24px}.vcp-he{margin-bottom:30px}.vcp-he{max-width:none}}',
+        // 600-819：留一点文字宽度不够，但比图标好认 —— 折中成 168px 窄侧栏。
+        // 不能只靠上面那条：168px 刚好放得下「召回调试」四个字 + 图标。
+        "@container (min-width:820px) and (max-width:1029px){.vcp-split{grid-template-columns:168px minmax(0,1fr)}.vcp-rail{padding:22px 9px 12px}.vcp-brand{padding:0 8px 20px}.vcp-item{gap:9px;padding:9px 9px;font-size:12.5px}.vcp-wrap{padding:36px 30px 80px}}",
+        // 420 以下：导航横过来当顶栏，图标 + 文字都保留（横向空间比纵向宽裕）。
+        '@container (max-width:419px){.vcp-split{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.vcp-rail{flex-direction:row;align-items:center;gap:2px;padding:7px 8px;border-right:0;border-bottom:.5px solid var(--dsw-alias-border-l3);overflow-x:auto}.vcp-nav{flex-direction:row;gap:2px;flex:0 0 auto}.vcp-item{padding:7px 9px;width:auto;gap:6px}.vcp-item .lbl{display:inline;font-size:12px}.vcp-wrap{padding:22px 14px 60px}.vcp-he h2{font-size:20px}.vcp-he{margin-bottom:24px}.vcp-search{margin-bottom:24px}.vcp-search input{flex:1 1 100%}.vcp-search .vcp-btn{width:100%}.vcp-hit p,.vcp-scores{margin-left:0}.vcp-dir .pt{display:none}.vcp-cols{gap:28px}}',
+        // 419-599：图标栏但页面留白收紧，正文继续让宽度。
+        "@container (min-width:420px) and (max-width:599px){.vcp-wrap{padding:26px 18px 64px}.vcp-he h2{font-size:21px}.vcp-he{margin-bottom:26px}.vcp-search{margin-bottom:26px}.vcp-search input{flex:1 1 100%}.vcp-search .vcp-btn{width:100%}.vcp-hit p,.vcp-scores{margin-left:0}}",
+        '@container (min-width:1030px){.vcp-split{grid-template-columns:236px minmax(0,1fr)}.vcp-cols{grid-template-columns:minmax(0,1fr) 272px;gap:40px}.vcp-band{grid-template-columns:1.4fr 1fr 1fr 1fr}}',
+        '@container (min-width:1240px){.vcp-wrap{padding:48px 56px 100px;max-width:1080px}.vcp-he h2{font-size:31px}.vcp-mem{padding:23px 0}.vcp-he{max-width:none}}',
+        '@media (prefers-reduced-motion:reduce){.vcp-item,.vcp-btn{transition:none}}',
+      ].join('\n')
+    }
+
+    function ensureCss() {
+      // 运行在真实页面里才注入；测试环境里 document 可能是精简 mock，
+      // 这时安静跳过即可 —— 样式不是逻辑，缺了不影响断言。
+      if (typeof document === 'undefined') return
+      if (typeof document.createElement !== 'function') return
+      var head = document.head
+      if (!head || typeof head.appendChild !== 'function') return
+      try {
+        if (typeof document.querySelector === 'function'
+          && document.querySelector('style[data-plugin-css="' + CSS_TAG + '"]') !== null) return
+        var tag = document.createElement('style')
+        if (tag && tag.dataset) tag.dataset.pluginCss = CSS_TAG
+        tag.textContent = cssText()
+        head.appendChild(tag)
+      } catch (error) {
+        console.warn('[vcprag] 样式注入失败：', error)
+      }
+    }
+
+    /** 导航小图标：只描边，跟宿主 nav 视觉一致。 */
+    function Icon(props) {
+      var kids = []
+      if (props.name === 'lib') {
+        kids.push(h('rect', { key: 'a', x: 2.6, y: 3.2, width: 4.1, height: 9.6 }))
+        kids.push(h('rect', { key: 'b', x: 9.3, y: 3.2, width: 4.1, height: 9.6 }))
+        kids.push(h('path', { key: 'c', d: 'M4.3 5.6h1M4.3 8h1M11 5.6h1M11 8h1' }))
+      } else if (props.name === 'recall') {
+        kids.push(h('circle', { key: 'a', cx: 7, cy: 7, r: 4.1 }))
+        kids.push(h('path', { key: 'b', d: 'M10.1 10.1 13.4 13.4' }))
+      } else if (props.name === 'index') {
+        kids.push(h('path', { key: 'a', d: 'M2.6 13.4V7.2M6.3 13.4V3.6M10 13.4V9.2M13.7 13.4V5.6' }))
+      } else {
+        kids.push(h('circle', { key: 'a', cx: 8, cy: 8, r: 2.1 }))
+        kids.push(h('path', { key: 'b', d: 'M8 1.9v1.5M8 12.6v1.5M1.9 8h1.5M12.6 8h1.5M3.7 3.7l1 1M11.3 11.3l1 1M12.3 3.7l-1 1M4.7 11.3l-1 1' }))
+      }
+      return h('svg', {
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.3,
+        'aria-hidden': 'true',
+      }, kids)
+    }
+
+    var PAGES = [
+      { id: 'lib', label: '记忆库', icon: 'lib' },
+      { id: 'recall', label: '召回调试', icon: 'recall' },
+      { id: 'index', label: '索引', icon: 'index' },
+      { id: 'settings', label: '设置', icon: 'settings' },
+    ]
+
+    /** 页头：四页共用同一骨架，保证切换时视觉基线不跳。 */
+    function PageHead(props) {
+      return h('header', { className: 'vcp-he' },
+        h('p', { className: 'vcp-eb' }, props.eyebrow),
+        h('h2', null, props.title),
+        props.sub ? h('p', { className: 'vcp-sub' }, props.sub) : null,
+        props.actions && props.actions.length > 0
+          ? h('div', { className: 'vcp-acts' }, props.actions)
+          : null)
+    }
+
+    /** 左导航 + 分页外壳。 */
+    function AppShell() {
+      ensureCss()
+
+      var pageState = React.useState('lib')
+      var active = pageState[0]
+      var setActive = pageState[1]
+
+      var statState = React.useState({ docs: null, chunks: null, ready: null })
+      var stat = statState[0]
+      var setStat = statState[1]
 
       React.useEffect(function () {
         function refresh() {
-          get('/state').then(function (r) { if (r.ok) set(r) })
+          get('/state').then(function (r) {
+            if (!r.ok || !r.index) return
+            setStat({
+              docs: r.index.docCount,
+              chunks: r.index.chunkCount,
+              ready: r.index.hybridReady === true,
+            })
+          })
         }
         refresh()
-        var timer = setInterval(refresh, 20000)
+        var timer = setInterval(refresh, 25000)
         return function () { clearInterval(timer) }
       }, [])
 
-      if (s === null) {
-        return h('div', { style: { fontSize: 11, color: TOKEN.label2, marginBottom: 10 } }, '读取状态…')
-      }
-
-      var idx = s.index
-      var tone = idx.hybridReady ? 'ok' : (idx.compatible && idx.compatible.fatal ? 'err' : 'warn')
-      var label = idx.hybridReady
-        ? '混合召回'
-        : idx.vectorsIndexed
-          ? '仅关键词（向量未参与查询）'
-          : '仅关键词'
-
-      // 只用日记时 activeDocs 恒为 0（没有 .md 语料），直接显示它会让用户
-      // 以为「一篇都没有」—— 这正是踩过的「共 0 篇 / 一直读取状态」。
-      // 总数取索引里实际文档数，再分别标注两层各多少。
-      var totalDocs = idx.docCount || 0
-      var diaryDocs = s.corpus.diaryDocs || 0
-      var corpusDocs = s.corpus.activeDocs || 0
-
-      return h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 } },
-        h('span', { style: S.badge(tone) }, label),
-        h('span', { style: S.badge('muted') }, '文档 ' + totalDocs + ' 篇'),
-        diaryDocs > 0 ? h('span', { style: S.badge('muted') }, '日记 ' + diaryDocs) : null,
-        corpusDocs > 0 ? h('span', { style: S.badge('muted') }, '语料 ' + corpusDocs) : null,
-        h('span', { style: S.badge('muted') }, 'chunk ' + idx.chunkCount),
-        h('span', { style: S.badge('muted') }, 'runtime ' + s.corpus.runtimeCount + ' 条'),
-        h('span', { style: S.badge('muted') }, '已向量化 ' + idx.vectorized),
-        idx.compatible && idx.compatible.ok === false && idx.compatible.reason
-          ? h('span', { style: S.badge('warn') }, idx.compatible.reason)
-          : null
-      )
-    }
-
-    // ================= 主面板 =================
-
-    var TABS = [
-      { id: 'library', label: '记忆库', component: LibraryTab },
-      { id: 'debug', label: '召回调试', component: DebugTab },
-      { id: 'index', label: '索引', component: IndexTab },
-      { id: 'settings', label: '设置', component: SettingsTab },
-    ]
-
-    function Panel() {
-      var st = React.useState('library')
-      var active = st[0]
-      var setActive = st[1]
-
-      var current = TABS[0]
-      for (var i = 0; i < TABS.length; i += 1) {
-        if (TABS[i].id === active) current = TABS[i]
-      }
-
-      var header = h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 } },
-        h('div', { style: { fontSize: 15, fontWeight: 700 } }, '记忆召回'),
-        h('div', { style: { fontSize: 11, color: TOKEN.label2 } }, 'vcprag'))
-
-      var tabs = h('div', { style: S.tabs },
-        TABS.map(function (tab) {
+      var nav = h('nav', { className: 'vcp-nav', role: 'tablist', 'aria-label': '记忆召回导航' },
+        PAGES.map(function (p) {
+          var isOn = active === p.id
           return h('button', {
-            key: tab.id,
-            style: S.tab(active === tab.id),
-            onClick: function () { setActive(tab.id) },
-          }, tab.label)
+            key: p.id,
+            className: 'vcp-item',
+            role: 'tab',
+            'aria-current': isOn ? 'page' : undefined,
+            'aria-selected': isOn ? 'true' : 'false',
+            title: p.label,
+            onClick: function () { setActive(p.id) },
+          },
+            h(Icon, { name: p.icon }),
+            h('span', { className: 'lbl' }, p.label),
+            p.id === 'lib' && stat.docs !== null
+              ? h('span', { className: 'num' }, String(stat.docs))
+              : null)
         }))
 
-      return h('div', { style: S.page },
-        header,
-        h(StatusBar, null),
-        tabs,
-        h(current.component, { key: active }))
+      var rail = h('aside', { className: 'vcp-rail' },
+        h('div', { className: 'vcp-brand' },
+          h('h1', null, '记忆召回'),
+          h('p', null, 'VCPRAG')),
+        nav,
+        h('div', { className: 'vcp-foot' },
+          h('div', { className: 'vcp-status' },
+            h('div', null, '索引 ', h('b', null, stat.ready === false ? '● 仅关键词' : '● 就绪')),
+            stat.chunks !== null ? h('div', null, String(stat.chunks) + ' 分块') : null)))
+
+      var bodyOf = {
+        lib: LibraryPage,
+        recall: RecallPage,
+        index: IndexPage,
+        settings: SettingsPage,
+      }
+
+      return h('div', { className: 'vcp-app' },
+        h('div', { className: 'vcp-split' },
+          rail,
+          h('main', { className: 'vcp-main' },
+          h('div', { className: 'vcp-wrap' },
+            PAGES.map(function (p) {
+              var Body = bodyOf[p.id]
+              return h('section', {
+                key: p.id,
+                className: 'vcp-page',
+                'data-page': p.id,
+                  'data-active': active === p.id ? 'true' : undefined,
+                  role: 'tabpanel',
+                }, h(Body, null))
+              })))))
+    }
+
+    //
+    // ## 兜底抽屉为什么挂在 shell.overlay
+    //
+    // 这个槽位活在整个 frame 里，不随会话或主面板卸载，所以「开着面板
+    // 切会话」不会把它关掉。position:fixed 靠右，不参与主区域路由。
+    // 宽度在这里自己算（宿主那份契约拿不到），照同样的比例取。
+    var drawer = {
+      open: false,
+      listeners: new Set(),
+      subscribe: function (fn) {
+        drawer.listeners.add(fn)
+        return function () { drawer.listeners.delete(fn) }
+      },
+      set: function (next) {
+        if (drawer.open === next) return
+        drawer.open = next
+        drawer.listeners.forEach(function (fn) {
+          try { fn(next) } catch (error) { console.warn('[vcprag] 抽屉监听器抛错', error) }
+        })
+        syncEntryActive()
+      },
+      toggle: function () { drawer.set(!drawer.open) },
+    }
+
+    /** 抽屉宽度：窄屏按比例收，避免在 1280 宽的小窗里把会话挤没。 */
+    function drawerWidth() {
+      var vw = (typeof window !== 'undefined' && window.innerWidth) || 1440
+      return Math.max(360, Math.min(560, Math.round(vw * 0.34)))
+    }
+
+    /**
+     * 抽屉本体。挂在 `shell.overlay` 上 —— 这个槽位活在整个 frame 里，
+     * 不随会话或主面板卸载，所以「开着抽屉切会话」不会把它关掉。
+     */
+    function Drawer(props) {
+      var st = React.useState(drawer.open)
+      var open = st[0]
+      var setOpen = st[1]
+
+      React.useEffect(function () {
+        return drawer.subscribe(function (next) { setOpen(next) })
+      }, [])
+
+      // Esc 关闭：抽屉是覆盖层，用户期望能一键退出来。
+      React.useEffect(function () {
+        if (!open) return undefined
+        function onKey(e) {
+          if (e.key === 'Escape') drawer.set(false)
+        }
+        document.addEventListener('keydown', onKey)
+        return function () { document.removeEventListener('keydown', onKey) }
+      }, [open])
+
+      if (!open) return null
+
+      var width = drawerWidth()
+
+      var shell = {
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: width,
+        maxWidth: '92vw',
+        zIndex: 60,
+        display: 'flex',
+        flexDirection: 'column',
+        background: TOKEN.surface,
+        color: TOKEN.label,
+        borderLeft: '0.5px solid ' + TOKEN.border2,
+        boxShadow: '-18px 0 48px rgba(0, 0, 0, 0.28)',
+        fontFamily: 'inherit',
+      }
+
+      var head = h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '14px 16px',
+          borderBottom: '0.5px solid ' + TOKEN.border,
+          flexShrink: 0,
+        },
+      },
+        h('div', { style: { flex: 1, minWidth: 0 } },
+          h('div', { style: { fontSize: 14, fontWeight: 700, lineHeight: '20px' } }, '记忆召回'),
+          h('div', { style: { fontSize: 11, color: TOKEN.label2 } }, 'vcprag · 日记与语料')),
+        h('button', {
+          type: 'button',
+          title: '关闭（Esc）',
+          'aria-label': '关闭记忆召回面板',
+          onClick: function () { drawer.set(false) },
+          style: {
+            font: 'inherit',
+            fontSize: 16,
+            lineHeight: '20px',
+            width: 28,
+            height: 28,
+            flexShrink: 0,
+            cursor: 'pointer',
+            borderRadius: 6,
+            border: 'none',
+            background: 'transparent',
+            color: TOKEN.label2,
+          },
+        }, '×'))
+
+      var body = h('div', {
+        style: Object.assign({}, S.page, { flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px 32px' }),
+      }, h(AppShell, null))
+
+      return h('div', { style: shell, 'data-dsh-plugin': 'dsh-vcprag', 'data-dsh-part': 'drawer' },
+        head,
+        body)
+    }
+
+    // ---- 左侧入口按钮：DOM 自愈挂载 ----
+    //
+    // 目标位置是「新建会话」那一行下方（= 会话列表上方）。宿主既没给
+    // 这个位置留插槽，也没给锚点，所以只能靠选择器找。选择器全部是
+    // mnemon 在真实客户端上验证过的那几个，命中任一即可：
+    //
+    //   [data-pane="sidebar"]   新版侧栏列
+    //   [class*="sidebarCol"]   旧版列
+    //   .dshDesktopUpstreamSidebar  桌面端上游侧栏
+    //
+    // 找不到就什么都不做（并在 body 上监听，等它出现)。
+
+    var ENTRY_ATTR = 'data-dsh-vcprag-entry'
+    var ENTRY_TEXT = '记忆召回'
+    var entryNode = null
+
+    function sidebarRoot() {
+      var column = document.querySelector(
+        '[data-pane="sidebar"], [class*="sidebarCol"], .dshDesktopUpstreamSidebar'
+      )
+      if (column === null) return null
+      var logo = column.querySelector('[class*="logoRow"]')
+      return (logo && logo.parentElement) || column.firstElementChild
+    }
+
+    function newSessionButton(root) {
+      var nested = root.querySelector('button[class*="newSession"]')
+      if (nested !== null) return nested
+      for (var i = 0; i < root.children.length; i += 1) {
+        if (root.children[i].tagName === 'BUTTON') return root.children[i]
+      }
+      return null
+    }
+
+    var entryOnOpen = null
+
+    function buildEntry() {
+      var btn = document.createElement('button')
+      btn.type = 'button'
+      btn.setAttribute(ENTRY_ATTR, '')
+      btn.setAttribute('aria-label', ENTRY_TEXT)
+      btn.title = ENTRY_TEXT
+      btn.style.cssText = [
+        'display:flex',
+        'align-items:center',
+        'gap:8px',
+        'width:100%',
+        'box-sizing:border-box',
+        'margin:2px 0 6px',
+        'padding:7px 10px',
+        'border:0',
+        'border-radius:8px',
+        'background:transparent',
+        'color:inherit',
+        'font:inherit',
+        'font-size:13px',
+        'line-height:18px',
+        'text-align:left',
+        'cursor:pointer',
+      ].join(';')
+      var icon = document.createElement('span')
+      icon.textContent = '◈'
+      icon.style.cssText = 'font-size:14px;line-height:18px;opacity:.75'
+      var label = document.createElement('span')
+      label.textContent = ENTRY_TEXT
+      label.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+      btn.appendChild(icon)
+      btn.appendChild(label)
+      btn.addEventListener('click', function (event) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (typeof entryOnOpen === 'function') entryOnOpen()
+        else drawer.toggle()
+        // openTab 是同步的，展开态立刻可见；重算一次高亮，否则点击后按钮不变色
+        syncEntryActive()
+      })
+      btn.addEventListener('mouseenter', function () { btn.style.background = TOKEN.hover })
+      btn.addEventListener('mouseleave', function () { syncEntryActive() })
+      return btn
+    }
+
+    /** 面板开着时把入口按钮标成选中态，跟宿主的导航行视觉一致。 */
+    function syncEntryActive() {
+      if (entryNode === null) return
+      var open = drawer.open
+      // 走原生右栏时抽屉不用，此时靠 sidebarRight.isExpanded 判断；
+      // 拿不到就退化成「不自作主张」，避免按钮永远高亮。
+      if (entryOnOpen !== null && typeof entryIsOpen === 'function') {
+        try { open = entryIsOpen() } catch { open = drawer.open }
+      }
+      if (open) {
+        entryNode.style.background = TOKEN.surface2
+        entryNode.setAttribute('aria-current', 'page')
+      } else {
+        entryNode.style.background = 'transparent'
+        entryNode.removeAttribute('aria-current')
+      }
+    }
+
+    var entryIsOpen = null
+
+    function placeEntry(root) {
+      var anchor = newSessionButton(root)
+      if (anchor === null) return false
+      var row = anchor.closest('[class*="logoRow"]')
+      var base = row !== null && row.parentElement === root ? row : anchor
+      var parent = base.parentElement
+      if (parent === null) return false
+      if (entryNode !== null && entryNode.parentElement === parent) return true
+      parent.insertBefore(entryNode, base.nextSibling)
+      return true
+    }
+
+    function mountSidebarEntry(options) {
+      entryOnOpen = options && typeof options.onOpen === 'function' ? options.onOpen : null
+      entryIsOpen = options && typeof options.isOpen === 'function' ? options.isOpen : null
+      if (entryNode !== null) return
+      entryNode = buildEntry()
+      syncEntryActive()
+
+      var root = null
+      var observer = null
+
+      function tryPlace() {
+        if (root !== null && !root.isConnected) {
+          root = null
+          if (observer !== null) { observer.disconnect(); observer = null }
+        }
+        if (root !== null && root.contains(entryNode)) return
+        root = sidebarRoot()
+        if (root === null) return
+        if (!placeEntry(root)) return
+        if (observer === null) {
+          // 侧栏切工作区时会整块重建，节点被摘掉后要能自己回去。
+          observer = new MutationObserver(function () {
+            if (root === null || !root.isConnected) { root = null; tryPlace(); return }
+            if (!root.contains(entryNode)) placeEntry(root)
+          })
+          observer.observe(root, { childList: true, subtree: true })
+        }
+      }
+
+      // 侧栏本身可能还没渲染出来，盯着 body 等它出现。
+      var waiting = new MutationObserver(tryPlace)
+      waiting.observe(document.body, { childList: true, subtree: true })
+      tryPlace()
     }
 
     // ---- DSH client 插件契约：必须是 { name, inject, apply } ----
     // 只 exports 组件是没用的 —— DSH 只认 slots 注册出来的面板。
     // 旧版就是漏了这一步，所以设置页里根本找不到入口。
     exports.name = 'vcprag'
-    exports.inject = ['slots']
+    exports.inject = ['slots', 'sidebarRight', 'sidebarRightTabs']
     exports.apply = function apply(ctx) {
-      var slots = ctx && (ctx.get ? ctx.get('slots') : ctx.slots)
-      if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') {
-        console.warn('[vcprag] slots 服务不可用，设置页未挂载')
-        return
+      var disposers = []
+
+      // 注入的服务直接挂在 ctx 上。ctx.get 只作兜底 —— 先 get 后取属性会把
+      // 已注入的服务误判成不可用（本轮就是这么静默失效的）。
+      function service(name) {
+        if (ctx === null || ctx === undefined) return undefined
+        if (ctx[name] !== undefined && ctx[name] !== null) return ctx[name]
+        if (typeof ctx.get === "function") {
+          try { return ctx.get(name) } catch { return undefined }
+        }
+        return undefined
       }
-      slots.inject('settings.section', function () {
-        return slots.register(
-          { name: 'settings.section', id: 'vcprag', order: 70, label: '记忆召回' },
-          Panel,
-        )
-      })
+
+      var slots = service('slots')
+      var sidebarRight = service('sidebarRight')
+      var tabs = service('sidebarRightTabs')
+
+      // ---- 设置页入口 ----
+      // 右栏是主入口，但设置页这一份保留：右栏不可用、或用户把右栏关掉时，
+      // 它是唯一还能改配置的地方。
+      if (slots && typeof slots.inject === 'function' && typeof slots.register === 'function') {
+        disposers.push(slots.inject('settings.section', function () {
+          return slots.register(
+            { name: 'settings.section', id: 'vcprag', order: 70, label: '记忆召回' },
+            AppShell,
+          )
+        }))
+      } else {
+        console.warn('[vcprag] slots 服务不可用，设置页未挂载')
+      }
+
+      // ---- 注册成宿主原生右侧栏的一个 tab 类型 ----
+      //
+      // 两步缺一不可，少做一步宿主不报错、也永远不显示：
+      //   1. sidebarRightTabs.register  声明「有这么一个 kind」
+      //   2. slots.register('sidebar.right.pane.tab', key=id)  提供正文
+      var canOpenPane = false
+      if (tabs && typeof tabs.register === 'function') {
+        try {
+          disposers.push(tabs.register({
+            id: KIND,
+            kind: KIND,
+            title: function () { return '记忆召回' },
+            priority: 'extension',
+          }))
+          canOpenPane = true
+        } catch (error) {
+          console.warn('[vcprag] 右栏 tab 类型注册失败：', error)
+        }
+      } else {
+        console.warn('[vcprag] sidebarRightTabs 不可用，退回自绘抽屉')
+      }
+
+      if (canOpenPane && slots) {
+        try {
+          // 用 slots.inject 包一层：宿主自己的 sidebar-browser 也是这么写的。
+          // 直接 register 在槽位尚未声明时会被丢掉，而且不报错。
+          if (typeof slots.inject === 'function' && typeof slots.register === 'function') {
+            disposers.push(slots.inject('sidebar.right.pane.tab', function () {
+              return slots.register(
+                { name: 'sidebar.right.pane.tab', key: KIND },
+                AppShell,
+              )
+            }))
+          } else {
+            disposers.push(slots.register(
+              { name: 'sidebar.right.pane.tab', key: KIND },
+              AppShell,
+            ))
+          }
+        } catch (error) {
+          canOpenPane = false
+          console.warn('[vcprag] 右栏正文注册失败：', error)
+        }
+      }
+
+      // ---- 兜底：右栏不可用时就地画抽屉 ----
+      //
+      // 这条路径以前是主路径，现在是兜底。留着它的理由很实际：右栏
+      // 服务缺失时，点按钮必须还有东西弹出来，不能静默无反应。
+      if (!canOpenPane && slots) {
+        try {
+          if (typeof slots.inject === 'function' && typeof slots.register === 'function') {
+            disposers.push(slots.inject('shell.overlay', function () {
+              return slots.register({ name: 'shell.overlay', id: 'vcprag', order: 90 }, Drawer)
+            }))
+          }
+        } catch (error) {
+          console.warn('[vcprag] 兜底抽屉未挂载：', error)
+        }
+      }
+
+      // 注册结果写进日志 —— 出问题时先看这一行，比猜快得多。
+      console.info('[vcprag] 面板注册：'
+        + '右栏tab=' + canOpenPane
+        + ' sidebarRight=' + (sidebarRight !== undefined && sidebarRight !== null)
+        + ' sidebarRightTabs=' + (tabs !== undefined && tabs !== null)
+        + ' slots=' + (slots !== undefined && slots !== null))
+
+      // ---- 左侧原生侧栏里的入口按钮 ----
+      // 宿主侧栏会整块重建，MutationObserver 负责补回去。
+      if (typeof document !== 'undefined' && typeof MutationObserver === 'function') {
+        try {
+          mountSidebarEntry({
+            onOpen: function openPane() {
+            if (canOpenPane && sidebarRight && typeof sidebarRight.openTab === 'function') {
+              try {
+                sidebarRight.openTab(KIND, {})
+                return
+              } catch (error) {
+                console.warn('[vcprag] 打开右栏失败，回退抽屉：', error)
+              }
+            }
+              drawer.set(true)
+            },
+            isOpen: function () {
+              if (!canOpenPane || !sidebarRight) return drawer.open
+              if (typeof sidebarRight.isExpanded === 'function') {
+                try { return sidebarRight.isExpanded() === true } catch { return drawer.open }
+              }
+              return drawer.open
+            },
+          })
+        } catch (error) {
+          console.warn('[vcprag] 左侧入口按钮未挂载：', error)
+        }
+      }
+
+      return function dispose() {
+        disposers.forEach(function (fn) { try { fn() } catch { /* 卸载期忽略 */ } })
+        if (entryNode !== null) { entryNode.remove(); entryNode = null }
+        drawer.set(false)
+      }
     }
 
     // 注意：不要额外导出 `default` / `Panel`。

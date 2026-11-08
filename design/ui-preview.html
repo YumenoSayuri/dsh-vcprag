@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆召回 · vcprag · 流体面板设计稿</title>
+<style>
+/* Hallmark · 形态 Workbench · 容器驱动响应式（对应 DSH 右侧栏真实契约）
+ * 契约来源：@deepseek-ai/dsh-client-ui-layout/lib/client.js
+ *   RIGHTBAR_DEFAULT_RATIO = .45 · RIGHTBAR_MAX_RATIO = .7
+ *   clampWidth(rightbar, 300, viewport * .7) · sidebar clampWidth(264, 420)
+ *   ⇒ 面板宽度 300px ~ 70% 视口，用户可拖拽，另有 fullscreen 态。
+ * 因此：不用固定栅格，全部依赖 @container 重排；三个断点覆盖 300 / ~760 / ~1040+。
+ */
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+
+:root{
+  --bg:#0f1012;
+  --surface:#17191c;
+  --surface-2:#1c1f23;
+  --surface-3:#242830;
+  --line:#282c33;
+  --line-soft:#1f2228;
+  --ink:#edeff3;
+  --ink-2:#a9b1bb;
+  --ink-3:#858e9b;
+  --accent:#d7a45e;
+  --accent-soft:rgba(215,164,94,.14);
+  --good:#62a97f;
+  --bad:#c8735f;
+  --r-sm:6px;
+  --r-md:10px;
+  --r-lg:14px;
+  --f-serif:"Source Han Serif SC","Noto Serif SC","Songti SC",SimSun,Georgia,serif;
+  --f-sans:"Source Han Sans SC","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono","Cascadia Mono",Consolas,ui-monospace,monospace;
+  --stage-bg:#08090a;
+}
+[data-theme="light"]{
+  --bg:#f7f5f1; --surface:#fffefb; --surface-2:#f2efe8; --surface-3:#e6e0d6;
+  --line:#e2ddd2; --line-soft:#eeebe3;
+  --ink:#1a1815; --ink-2:#565047; --ink-3:#756e62;
+  --accent:#8d611f; --accent-soft:rgba(141,97,31,.11);
+  --good:#2b7150; --bad:#9a4430;
+  --stage-bg:#e9e6df;
+}
+
+body{
+  font-family:var(--f-sans);font-size:14px;line-height:1.7;
+  background:var(--stage-bg);color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ══════════ 预览外壳（不属于产品 UI） ══════════ */
+.demo{
+  position:sticky;top:0;z-index:100;
+  background:#15171a;border-bottom:1px solid #262a30;
+  padding:11px 18px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+}
+.demo-t{font-size:12px;font-weight:600;color:#d7dbe1;letter-spacing:.04em}
+.demo-t span{font-weight:400;color:#6c757f;font-size:11px;margin-left:8px}
+.demo-group{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.demo-group button{
+  font:inherit;font-size:11.5px;padding:6px 12px;border-radius:5px;
+  border:1px solid #2b3037;background:#1c1f24;color:#98a1ac;cursor:pointer;
+  transition:background 110ms ease,color 110ms ease,border-color 110ms ease;
+  font-family:var(--f-mono);
+}
+.demo-group button:hover{background:#242830;color:#d7dbe1}
+.demo-group button[aria-pressed="true"]{
+  background:#d7a45e;border-color:#d7a45e;color:#1a1408;font-weight:600;
+}
+.demo-note{
+  max-width:1500px;margin:0 auto;padding:14px 18px 4px;
+  font-size:11.5px;color:#6c757f;line-height:1.75;
+}
+.demo-note b{color:#b9c1cb;font-weight:600}
+.demo-note code{font-family:var(--f-mono);font-size:10.5px;color:#d7a45e}
+
+.stage{padding:18px 18px 70px;display:flex;justify-content:center;overflow-x:auto}
+
+/* ══════════ 产品面板本体 ══════════ */
+.app{
+  container-type:inline-size;
+  width:var(--demo-w,864px);
+  flex:0 0 auto;
+  height:min(880px,calc(100vh - 120px));
+  display:grid;
+  grid-template-columns:248px minmax(0,1fr);
+  background:var(--bg);
+  border:1px solid #2a2e35;
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 18px 60px rgba(0,0,0,.5);
+  transition:width 160ms cubic-bezier(.2,.8,.2,1);
+}
+
+/* ── 左导航 ── */
+.rail{
+  display:flex;flex-direction:column;
+  background:var(--surface);
+  border-right:1px solid var(--line);
+  padding:26px 14px 16px;
+  min-width:0;
+}
+.rail-brand{padding:0 10px 26px;min-width:0}
+.rail-brand h1{
+  margin:0;font-family:var(--f-serif);font-size:17px;font-weight:600;
+  letter-spacing:.055em;color:var(--ink);white-space:nowrap;
+}
+.rail-brand p{
+  margin:6px 0 0;font-family:var(--f-mono);font-size:10px;
+  letter-spacing:.1em;color:var(--ink-3);white-space:nowrap;
+}
+.rail-nav{display:flex;flex-direction:column;gap:2px}
+.nav-item{
+  display:flex;align-items:center;gap:11px;
+  padding:10px 11px;border:0;border-radius:var(--r-sm);
+  background:none;color:var(--ink-2);
+  font:inherit;font-size:13px;text-align:left;cursor:pointer;
+  transition:background 110ms ease,color 110ms ease;
+  min-width:0;
+}
+.nav-item:hover{background:var(--surface-2);color:var(--ink)}
+.nav-item[aria-current="page"]{background:var(--surface-3);color:var(--ink);font-weight:600}
+.nav-item .ico{flex:0 0 16px;width:16px;height:16px;opacity:.75}
+.nav-item[aria-current="page"] .ico{opacity:1;color:var(--accent)}
+.nav-item .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-item .num{
+  margin-left:auto;font-family:var(--f-mono);font-size:10px;
+  color:var(--ink-3);font-weight:400;
+}
+.rail-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--line-soft)}
+.rail-status{font-family:var(--f-mono);font-size:10px;color:var(--ink-3);line-height:1.95;white-space:nowrap;overflow:hidden}
+.rail-status b{color:var(--good);font-weight:400}
+.rail-theme{
+  display:flex;align-items:center;gap:8px;margin-top:12px;width:100%;
+  padding:8px 9px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:none;color:var(--ink-2);font:inherit;font-size:11.5px;
+  cursor:pointer;white-space:nowrap;overflow:hidden;
+}
+.rail-theme:hover{background:var(--surface-2);color:var(--ink)}
+
+/* ── 主内容 ── */
+.main{overflow-y:auto;overflow-x:hidden;min-width:0}
+.main::-webkit-scrollbar{width:10px}
+.main::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:5px;border:3px solid var(--bg)}
+.wrap{max-width:1060px;margin:0 auto;padding:44px 48px 96px}
+
+.page{display:none}
+.page[data-active="true"]{display:block}
+
+/* ── 页头 ── */
+.phead{margin:0 0 42px;max-width:72ch}
+.phead .eb{
+  margin:0 0 12px;font-family:var(--f-mono);font-size:10px;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--accent);
+}
+.phead h2{
+  margin:0;font-family:var(--f-serif);font-size:30px;font-weight:600;
+  letter-spacing:-.005em;line-height:1.32;color:var(--ink);
+}
+.phead .sub{margin:14px 0 0;font-size:13.5px;line-height:1.85;color:var(--ink-2)}
+.phead .acts{margin-top:24px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+
+/* ── 组件 ── */
+.btn{
+  font:inherit;font-size:13px;line-height:1;padding:10px 17px;
+  border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--surface-2);color:var(--ink);cursor:pointer;
+  transition:background 110ms ease;
+}
+.btn:hover{background:var(--surface-3)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#1a1509;font-weight:600}
+.btn-primary:hover{background:var(--accent);filter:brightness(1.07)}
+.btn-quiet{background:none;border-color:transparent;color:var(--ink-2);padding:10px 11px}
+.btn-quiet:hover{background:var(--surface-2);color:var(--ink)}
+
+.cols{display:grid;grid-template-columns:minmax(0,1fr);gap:44px;align-items:start}
+
+.sec-t{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 18px}
+.sec-t h3{margin:0;font-size:13.5px;font-weight:600;letter-spacing:.02em;color:var(--ink)}
+.sec-t .meta{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);text-align:right}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 20px}
+.panel + .panel{margin-top:18px}
+.panel-t{
+  margin:0 0 16px;font-size:10.5px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);
+}
+.bar-row{margin-bottom:15px}
+.bar-row:last-child{margin-bottom:0}
+.bar-lab{
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  font-size:12.5px;color:var(--ink-2);margin-bottom:7px;
+}
+.bar-lab b{font-family:var(--f-mono);font-size:10.5px;font-weight:400;color:var(--ink-3);white-space:nowrap}
+.bar-track{height:5px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.bar-track i{display:block;height:100%;border-radius:3px;background:var(--accent)}
+.bar-track i.dim{background:#8e713f}
+
+.kv{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px}
+.kv:last-child{border-bottom:0;padding-bottom:0}
+.kv span{color:var(--ink-3);white-space:nowrap}
+.kv b{font-family:var(--f-mono);font-size:11px;font-weight:400;color:var(--ink-2);text-align:right;word-break:break-all}
+
+/* ── 记忆库 ── */
+.mem{padding:22px 0;border-bottom:1px solid var(--line-soft);cursor:pointer}
+.mem:first-of-type{border-top:1px solid var(--line-soft)}
+.mem-head{display:flex;align-items:baseline;gap:12px}
+.mem-head h4{
+  margin:0;font-size:14px;font-weight:600;letter-spacing:.01em;
+  color:var(--ink);line-height:1.55;min-width:0;
+}
+.mem-head time{
+  margin-left:auto;flex:0 0 auto;font-family:var(--f-mono);
+  font-size:10.5px;color:var(--ink-3);
+}
+.mem-ex{margin:9px 0 0;font-size:13px;line-height:1.85;color:var(--ink-2);max-width:72ch}
+.mem-meta{
+  margin:11px 0 0;display:flex;gap:18px;flex-wrap:wrap;
+  font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);
+}
+.mem-more{display:none}
+.mem[data-open="1"] .mem-more{display:block;margin-top:16px}
+.mem[data-open="1"] .mem-head h4{color:var(--accent)}
+.more-box{background:var(--surface-2);border-radius:var(--r-md);padding:18px 20px}
+.more-box p{margin:0 0 14px;font-size:12.5px;line-height:1.85;color:var(--ink-2)}
+.more-box p:last-of-type{margin-bottom:0}
+.more-acts{display:flex;gap:7px;margin-top:16px;flex-wrap:wrap}
+
+/* ── 召回 ── */
+.search-big{display:flex;gap:10px;margin:0 0 36px;flex-wrap:wrap}
+.search-big input{
+  flex:1 1 240px;min-width:0;font:inherit;font-size:14px;
+  padding:14px 18px;border-radius:var(--r-md);
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);
+  transition:border-color 110ms ease,box-shadow 110ms ease;
+}
+.search-big input::placeholder{color:var(--ink-3)}
+.search-big input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.search-big .btn{flex:0 0 auto;padding:14px 22px;border-radius:var(--r-md)}
+
+.hit{padding:20px 0;border-bottom:1px solid var(--line-soft)}
+.hit:first-of-type{border-top:1px solid var(--line-soft)}
+.hit-top{display:flex;align-items:baseline;gap:11px}
+.hit-rank{flex:0 0 16px;font-family:var(--f-mono);font-size:10.5px;color:var(--accent)}
+.hit-top h4{margin:0;font-size:13.5px;font-weight:600;color:var(--ink);min-width:0}
+.hit-score{
+  margin-left:auto;flex:0 0 auto;font-family:var(--f-mono);font-size:12px;
+  color:var(--ink-2);font-variant-numeric:tabular-nums;
+}
+.hit p{margin:8px 0 0 27px;font-size:12.5px;line-height:1.85;color:var(--ink-2);max-width:68ch}
+.hit-scores{
+  margin:10px 0 0 27px;display:flex;gap:20px;flex-wrap:wrap;
+  font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);
+}
+.hit-scores em{font-style:normal;color:var(--ink-2)}
+
+.slider-row{margin-bottom:20px}
+.slider-row .bar-lab{margin-bottom:8px}
+.slider-row input[type=range]{
+  width:100%;appearance:none;height:4px;border-radius:2px;
+  background:var(--surface-3);outline:none;
+}
+.slider-row input[type=range]::-webkit-slider-thumb{
+  appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);cursor:pointer;border:0;
+}
+.slider-row input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+
+.switch{display:inline-flex;align-items:center;cursor:pointer}
+.switch input{
+  appearance:none;flex:0 0 38px;width:38px;height:21px;margin:0;
+  border-radius:11px;background:var(--surface-3);border:1px solid var(--line);
+  position:relative;cursor:pointer;
+  transition:background 120ms ease,border-color 120ms ease;
+}
+.switch input:checked{background:var(--accent);border-color:var(--accent)}
+.switch input::after{
+  content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
+  border-radius:50%;background:var(--ink);transition:transform 120ms ease;
+}
+.switch input:checked::after{transform:translateX(17px);background:#1a1509}
+.switch-row{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:12px 0;border-bottom:1px solid var(--line-soft);
+}
+.switch-row:last-child{border-bottom:0}
+.switch-row .sw-lab{font-size:12.5px;color:var(--ink-2);min-width:0}
+
+/* ── 索引 ── */
+.stat-band{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;margin:0 0 42px;
+}
+.stat{background:var(--surface);padding:22px 20px;min-width:0}
+.stat b{
+  display:block;font-size:26px;font-weight:600;letter-spacing:-.025em;
+  line-height:1.15;font-variant-numeric:tabular-nums;color:var(--ink);
+}
+.stat span{display:block;margin-top:8px;font-size:11.5px;color:var(--ink-3)}
+.stat .tag{
+  display:inline-block;margin-top:10px;padding:3px 8px;border-radius:20px;
+  font-family:var(--f-mono);font-size:10px;
+  background:var(--accent-soft);color:var(--accent);
+}
+
+.folder{padding:18px 0;border-bottom:1px solid var(--line-soft);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.folder:first-of-type{border-top:1px solid var(--line-soft)}
+.folder .fname{font-size:13px;color:var(--ink);flex:1 1 130px;min-width:0}
+.folder .fpath{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);flex:0 1 auto;word-break:break-all}
+.folder .fnum{font-family:var(--f-mono);font-size:11px;color:var(--ink-2);flex:0 0 auto;margin-left:auto}
+.folder .fchunks{font-family:var(--f-mono);font-size:11px;color:var(--ink-3);flex:0 0 auto;min-width:56px;text-align:right}
+
+/* ── 设置 ── */
+.set-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:30px;align-items:start}
+.set-nav{display:flex;gap:4px;flex-wrap:wrap}
+.set-nav button{
+  padding:8px 13px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:none;color:var(--ink-2);font:inherit;font-size:12.5px;cursor:pointer;
+  white-space:nowrap;
+}
+.set-nav button:hover{background:var(--surface-2);color:var(--ink)}
+.set-nav button[aria-current="true"]{
+  background:var(--accent-soft);border-color:transparent;
+  color:var(--accent);font-weight:600;
+}
+.form-sec{margin:0 0 46px}
+.form-sec:last-child{margin-bottom:0}
+.form-sec > h3{margin:0 0 8px;font-size:14.5px;font-weight:600;letter-spacing:.01em;color:var(--ink)}
+.form-sec > .hint{
+  margin:0 0 26px;font-size:12.5px;line-height:1.8;
+  color:var(--ink-3);max-width:66ch;
+}
+.field{margin:0 0 26px;max-width:520px}
+.field > label{display:block;font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:8px}
+.field > .desc{display:block;margin:0 0 9px;font-size:12px;line-height:1.75;color:var(--ink-3)}
+.field input,.field select{
+  width:100%;font:inherit;font-size:13px;padding:11px 13px;border-radius:var(--r-sm);
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);
+  transition:border-color 110ms ease,box-shadow 110ms ease;
+}
+.field input:focus,.field select:focus{
+  outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);
+}
+.field-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;max-width:520px}
+.field-row .field{max-width:none}
+
+.savebar{
+  position:sticky;bottom:0;z-index:4;
+  display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap;
+  padding:15px 0;margin-top:8px;
+  background:var(--bg);border-top:1px solid var(--line);
+}
+.savebar .saved{
+  margin-right:auto;font-family:var(--f-mono);font-size:10.5px;
+  color:var(--ink-3);min-width:0;
+}
+
+/* ══════════ 容器查询：面板变窄时的重排 ══════════ */
+
+/* < 900px：侧栏收成图标条，隐藏文字 */
+@container (max-width:899px){
+  .app{grid-template-columns:66px minmax(0,1fr)}
+  .rail{padding:22px 9px 14px;align-items:center}
+  .rail-brand{padding:0 0 22px;text-align:center}
+  .rail-brand{display:none}
+  .nav-item{justify-content:center;padding:11px 0;width:100%}
+  .nav-item .lbl,.nav-item .num{display:none}
+  .rail-foot{border-top:0}
+  .rail-status{display:none}
+  .rail-theme{justify-content:center;padding:9px 0}
+  .rail-theme span{display:none}
+  .wrap{padding:34px 26px 80px}
+  .phead h2{font-size:25px}
+  .phead{margin-bottom:32px}
+  .cols{gap:32px}
+}
+
+/* < 620px：侧栏变成顶部横向分段控件 */
+@container (max-width:619px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .rail{
+    flex-direction:row;align-items:center;gap:5px;
+    padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);
+    overflow-x:auto;
+  }
+  .rail-brand{padding:0 10px 0 0;text-align:left;flex:0 0 auto}
+  .rail-brand h1{font-size:12px;writing-mode:horizontal-tb;letter-spacing:.04em}
+  .rail-nav{flex-direction:row;gap:4px;flex:0 0 auto}
+  .nav-item{padding:8px 11px;width:auto}
+  .nav-item .lbl{display:inline;font-size:12.5px}
+  .rail-foot{margin:0 0 0 auto;padding:0;border:0;flex:0 0 auto}
+  .rail-theme{padding:7px 9px;margin:0}
+  .wrap{padding:26px 18px 70px}
+  .phead h2{font-size:22px}
+  .phead .sub{font-size:13px}
+  .search-big input{flex:1 1 100%}
+  .search-big .btn{width:100%}
+  .field-row{grid-template-columns:minmax(0,1fr)}
+  .folder .fpath{display:none}
+  .hit p,.hit-scores{margin-left:0}
+}
+
+/* > 1040px：才出现右侧信息栏（避免中等宽度被挤） */
+@container (min-width:1040px){
+  .cols{grid-template-columns:minmax(0,1fr) 286px;gap:44px}
+  .set-layout{grid-template-columns:158px minmax(0,1fr);gap:52px}
+  .set-nav{flex-direction:column;position:sticky;top:0}
+  .set-nav button{text-align:left;border-color:transparent}
+  .set-nav button:hover{background:var(--surface-2)}
+  .stat-band{grid-template-columns:1.4fr 1fr 1fr 1fr}
+}
+
+/* > 1240px：宽态，行高与字号略放大，避免拉稀 */
+@container (min-width:1240px){
+  .wrap{padding:52px 60px 110px;max-width:1120px}
+  .phead h2{font-size:34px}
+  .phead .sub{font-size:14px}
+  .mem{padding:26px 0}
+  .mem-ex{font-size:13.5px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .app{transition:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════ 预览控制条（验收用，不是产品 UI） ═══════ -->
+<div class="demo">
+  <div class="demo-t">
+    右侧栏宽度预览<span>300 – 70% 视口，可拖拽</span>
+  </div>
+  <div class="demo-group">
+    <button data-w="300" aria-pressed="false">300</button>
+    <button data-w="460" aria-pressed="false">460</button>
+    <button data-w="760" aria-pressed="false">760</button>
+    <button data-w="864" aria-pressed="true">864（默认）</button>
+    <button data-w="1040" aria-pressed="false">1040</button>
+    <button data-w="1360" aria-pressed="false">1360</button>
+    <button id="themeBtn" aria-pressed="false">浅色</button>
+  </div>
+</div>
+<p class="demo-note">
+  面板宽度契约来自宿主源码：<code>clampWidth(rightbar, 300, viewport*0.7)</code>，首次打开 <code>viewport*0.45</code>。
+  默认 864 就是图 1 的样子。点上面的数字看重排：<b>≥1040</b> 长出右侧信息栏与左侧设置子导航；<b>900–1039</b> 侧栏仍是文字导航、单栏正文；
+  <b>620–899</b> 侧栏收成图标条；<b><620</b> 侧栏变成顶部横向分段控件。四个页面（记忆库 / 召回调试 / 索引 / 设置）都是同一个流体骨架。
+</p>
+
+<div class="stage">
+  <div class="app" id="app">
+
+    <!-- ═══════ 左侧导航 ═══════ -->
+    <aside class="rail">
+      <div class="rail-brand">
+        <h1>记忆召回</h1>
+        <p>VCPRAG 0.3</p>
+      </div>
+
+      <nav class="rail-nav" role="tablist" aria-label="主导航">
+        <button class="nav-item" data-go="lib" role="tab" aria-current="page" title="记忆库">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2.6 3.2h4.1v9.6H2.6zM9.3 3.2h4.1v9.6H9.3"/><path d="M4.3 5.6h1M4.3 8h1M11 5.6h1M11 8h1"/></svg>
+          <span class="lbl">记忆库</span><span class="num">62</span>
+        </button>
+        <button class="nav-item" data-go="recall" role="tab" title="召回调试">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="7" cy="7" r="4.1"/><path d="M10.1 10.1 13.4 13.4"/></svg>
+          <span class="lbl">召回调试</span>
+        </button>
+        <button class="nav-item" data-go="index" role="tab" title="索引">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2.6 13.4V7.2M6.3 13.4V3.6M10 13.4V9.2M13.7 13.4V5.6"/></svg>
+          <span class="lbl">索引</span>
+        </button>
+        <button class="nav-item" data-go="settings" role="tab" title="设置">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="2.1"/><path d="M8 1.9v1.5M8 12.6v1.5M1.9 8h1.5M12.6 8h1.5M3.7 3.7l1 1M11.3 11.3l1 1M12.3 3.7l-1 1M4.7 11.3l-1 1"/></svg>
+          <span class="lbl">设置</span>
+        </button>
+      </nav>
+
+      <div class="rail-foot">
+        <div class="rail-status">
+          索引 <b>● 已同步</b><br>
+          1 284 块 · 1024 维
+        </div>
+        <button class="rail-theme" id="railTheme" title="切换主题">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="3.3"/><path d="M8 1.2v1.5M8 13.3v1.5M1.2 8h1.5M13.3 8h1.5"/></svg>
+          <span>浅色</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ═══════ 主内容 ═══════ -->
+    <main class="main">
+      <div class="wrap">
+
+        <!-- ── 1 记忆库 ── -->
+        <section class="page" data-page="lib" data-active="true" role="tabpanel">
+          <header class="phead">
+            <p class="eb">语料</p>
+            <h2>记忆库</h2>
+            <p class="sub">
+              六十二篇日记与排障记录，切成一 284 个语义分块。这里每一行都是一条可被召回的记忆，
+              点开能读到原文，也能看到它的三路打分。
+            </p>
+            <div class="acts">
+              <button class="btn btn-primary">新增记忆</button>
+              <button class="btn">重新扫描目录</button>
+              <button class="btn btn-quiet">导出</button>
+            </div>
+          </header>
+
+          <div class="cols">
+            <div>
+              <div class="sec-t">
+                <h3>最近写入</h3>
+                <span class="meta">按时间倒序 · 62 条</span>
+              </div>
+
+              <article class="mem" data-open="1">
+                <div class="mem-head">
+                  <h4>排障记录 · ComfyUI 换模型免重启</h4>
+                  <time>12:04</time>
+                </div>
+                <p class="mem-ex">
+                  把 model 换成 sd_xl_refiner 之后，重启 worker 仍指向旧 checkpoint。
+                  实际原因不是缓存，是它在启动时把 model 目录读进了内存，之后再不重读。
+                </p>
+                <div class="mem-meta"><span>4 块</span><span>排障记录</span><span>词法 0.62 · 语义 0.81</span></div>
+                <div class="mem-more">
+                  <div class="more-box">
+                    <p>
+                      改配置文件对它无效，必须让 worker 重新扫描。所以要么重启 worker，
+                      要么在 worker 里加一个重扫入口——我选了后者，因为重启会打断正在跑的队列。
+                    </p>
+                    <p>
+                      附带一条：<code>--model-root</code> 指的是目录而不是具体文件，
+                      所以换文件名不会生效，只有换目录才会。
+                    </p>
+                    <div class="more-acts">
+                      <button class="btn">打开原文</button>
+                      <button class="btn">拿来当上下文</button>
+                      <button class="btn btn-quiet">改标题</button>
+                      <button class="btn btn-quiet">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="mem" data-open="0">
+                <div class="mem-head">
+                  <h4>设计备忘 · 为什么不用 sidebar.panellist</h4>
+                  <time>11:38</time>
+                </div>
+                <p class="mem-ex">
+                  宿主那个槽位与 main 键槽是一对，注册进去会把中间会话区整块换掉，
+                  不是我们想要的右侧栏行为。所以入口走原生侧栏 DOM，面板走 overlay。
+                </p>
+                <div class="mem-meta"><span>4 块</span><span>设计备忘</span></div>
+              </article>
+
+              <article class="mem" data-open="0">
+                <div class="mem-head">
+                  <h4>日记 · 2026-11-07 · 晚上</h4>
+                  <time>22:10</time>
+                </div>
+                <p class="mem-ex">
+                  今天主要在收尾设置持久化那个 bug。根因是保存时 overlay 只合并非空字段，
+                  被清空的项直接丢失，所以重启后又回来了旧值。
+                </p>
+                <div class="mem-meta"><span>31 块</span><span>日记</span></div>
+              </article>
+
+              <article class="mem" data-open="0">
+                <div class="mem-head">
+                  <h4>排障记录 · jev 反代 502</h4>
+                  <time>09:52</time>
+                </div>
+                <p class="mem-ex">
+                  502 是上游超时，不是鉴权失败。鉴权失败会返回 401 且带 error 字段，
+                  这里响应体是空的心跳页，说明请求根本没到上游。
+                </p>
+                <div class="mem-meta"><span>17 块</span><span>排障记录</span></div>
+              </article>
+
+              <article class="mem" data-open="0">
+                <div class="mem-head">
+                  <h4>日记 · 2026-11-06 · 下午</h4>
+                  <time>15:20</time>
+                </div>
+                <p class="mem-ex">
+                  把嵌入从本地 bge 换成了 jina-v3，1024 维，召回质量明显好一些，
+                  尤其是中文长句的语义匹配。
+                </p>
+                <div class="mem-meta"><span>28 块</span><span>日记</span></div>
+              </article>
+            </div>
+
+            <aside>
+              <div class="panel">
+                <p class="panel-t">来源分布</p>
+                <div class="bar-row">
+                  <div class="bar-lab"><span>日记 · 2026-11</span><b>318</b></div>
+                  <div class="bar-track"><i style="width:100%"></i></div>
+                </div>
+                <div class="bar-row">
+                  <div class="bar-lab"><span>日记 · 2026-10</span><b>462</b></div>
+                  <div class="bar-track"><i class="dim" style="width:100%"></i></div>
+                </div>
+                <div class="bar-row">
+                  <div class="bar-lab"><span>排障记录</span><b>401</b></div>
+                  <div class="bar-track"><i class="dim" style="width:87%"></i></div>
+                </div>
+                <div class="bar-row">
+                  <div class="bar-lab"><span>设计备忘</span><b>103</b></div>
+                  <div class="bar-track"><i class="dim" style="width:22%"></i></div>
+                </div>
+              </div>
+              <div class="panel">
+                <p class="panel-t">状态</p>
+                <div class="kv"><span>语料</span><b>62 条</b></div>
+                <div class="kv"><span>分块</span><b>1 284</b></div>
+                <div class="kv"><span>嵌入</span><b>jina-v3</b></div>
+                <div class="kv"><span>上次扫描</span><b>2 小时前</b></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ── 2 召回调试 ── -->
+        <section class="page" data-page="recall" role="tabpanel">
+          <header class="phead">
+            <p class="eb">调试</p>
+            <h2>召回调试</h2>
+            <p class="sub">
+              用一句话问它，看它翻出什么、每块分别得了多少分。词法与语义两路各自打分，
+              再按权重融合排序——分数不对时，问题通常出在权重或分块粒度上。
+            </p>
+          </header>
+
+          <div class="search-big">
+            <input type="text" value="ComfyUI 换模型为什么改了配置还读老 checkpoint" aria-label="召回查询">
+            <button class="btn btn-primary">召回</button>
+          </div>
+
+          <div class="cols">
+            <div>
+              <div class="sec-t">
+                <h3>命中 3 条</h3>
+                <span class="meta">阈值 0.40 · 上限 8</span>
+              </div>
+
+              <article class="hit">
+                <div class="hit-top">
+                  <span class="hit-rank">01</span>
+                  <h4>排障记录 · ComfyUI 换模型免重启</h4>
+                  <span class="hit-score">0.78</span>
+                </div>
+                <p>worker 读的是启动时缓存的清单，不重读 model 目录。改配置文件对它无效，必须让 worker 重新扫描。</p>
+                <div class="hit-scores"><span>词法 <em>0.62</em></span><span>语义 <em>0.81</em></span><span>融合 <em>0.78</em></span></div>
+              </article>
+
+              <article class="hit">
+                <div class="hit-top">
+                  <span class="hit-rank">02</span>
+                  <h4>排障记录 · jev 反代 502</h4>
+                  <span class="hit-score">0.55</span>
+                </div>
+                <p>启动参数里的 --model-root 指的是目录而不是具体文件，所以换文件名不会生效，只有换目录才会。</p>
+                <div class="hit-scores"><span>词法 <em>0.62</em></span><span>语义 <em>0.44</em></span><span>融合 <em>0.55</em></span></div>
+              </article>
+
+              <article class="hit">
+                <div class="hit-top">
+                  <span class="hit-rank">03</span>
+                  <h4>日记 · 2026-11-07 · 晚上</h4>
+                  <span class="hit-score">0.41</span>
+                </div>
+                <p>把嵌入从本地 bge 换成了 jina-v3，1024 维，召回质量明显好一些，尤其是中文长句的语义匹配。</p>
+                <div class="hit-scores"><span>词法 <em>0.18</em></span><span>语义 <em>0.67</em></span><span>融合 <em>0.41</em></span></div>
+              </article>
+            </div>
+
+            <aside>
+              <div class="panel">
+                <p class="panel-t">召回参数</p>
+                <div class="slider-row">
+                  <div class="bar-lab"><span>词法权重</span><b id="wLex">0.35</b></div>
+                  <input type="range" min="0" max="100" value="35" aria-label="词法权重">
+                </div>
+                <div class="slider-row">
+                  <div class="bar-lab"><span>语义权重</span><b id="wSem">0.65</b></div>
+                  <input type="range" min="0" max="100" value="65" aria-label="语义权重">
+                </div>
+                <div class="slider-row">
+                  <div class="bar-lab"><span>返回上限</span><b>8 条</b></div>
+                  <input type="range" min="1" max="20" value="8" aria-label="返回上限">
+                </div>
+              </div>
+
+              <div class="panel">
+                <p class="panel-t">开关</p>
+                <div class="switch-row">
+                  <span class="sw-lab">判官重排</span>
+                  <label class="switch"><input type="checkbox" checked aria-label="判官重排"></label>
+                </div>
+                <div class="switch-row">
+                  <span class="sw-lab">跨目录去重</span>
+                  <label class="switch"><input type="checkbox" checked aria-label="跨目录去重"></label>
+                </div>
+                <div class="switch-row">
+                  <span class="sw-lab">返回原始分块</span>
+                  <label class="switch"><input type="checkbox" aria-label="返回原始分块"></label>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ── 3 索引 ── -->
+        <section class="page" data-page="index" role="tabpanel">
+          <header class="phead">
+            <p class="eb">索引</p>
+            <h2>索引</h2>
+            <p class="sub">
+              索引状态、目录明细与重建入口。重建是全量重算嵌入，一 284 个分块大约两分钟；
+              校验只比对元数据，几秒就能跑完。
+            </p>
+            <div class="acts">
+              <button class="btn btn-primary">重建索引</button>
+              <button class="btn">校验一致性</button>
+              <button class="btn btn-quiet">查看日志</button>
+            </div>
+          </header>
+
+          <div class="stat-band">
+            <div class="stat">
+              <b>1 284</b><span>已索引分块</span><span class="tag">● 已同步</span>
+            </div>
+            <div class="stat"><b>0</b><span>待写入</span></div>
+            <div class="stat"><b>1024</b><span>向量维数</span></div>
+            <div class="stat"><b>2h</b><span>上次重建</span></div>
+          </div>
+
+          <div class="sec-t">
+            <h3>目录明细</h3>
+            <span class="meta">4 个目录</span>
+          </div>
+
+          <div class="folder">
+            <span class="fname">日记 · 2026-11</span>
+            <span class="fpath">D:/Diary/2026-11</span>
+            <span class="fnum">12 条</span>
+            <span class="fchunks">318 块</span>
+          </div>
+          <div class="folder">
+            <span class="fname">日记 · 2026-10</span>
+            <span class="fpath">D:/Diary/2026-10</span>
+            <span class="fnum">18 条</span>
+            <span class="fchunks">462 块</span>
+          </div>
+          <div class="folder">
+            <span class="fname">排障记录</span>
+            <span class="fpath">D:/Diary/troubleshoot</span>
+            <span class="fnum">23 条</span>
+            <span class="fchunks">401 块</span>
+          </div>
+          <div class="folder">
+            <span class="fname">设计备忘</span>
+            <span class="fpath">D:/Diary/design</span>
+            <span class="fnum">9 条</span>
+            <span class="fchunks">103 块</span>
+          </div>
+        </section>
+
+        <!-- ── 4 设置 ── -->
+        <section class="page" data-page="settings" role="tabpanel">
+          <header class="phead">
+            <p class="eb">设置</p>
+            <h2>设置</h2>
+            <p class="sub">
+              这几项决定它去哪里找东西、怎么算相似度。改动立刻生效，
+              但要让旧分块用上新模型，还得重建索引。
+            </p>
+          </header>
+
+          <div class="set-layout">
+            <nav class="set-nav" aria-label="设置分区">
+              <button aria-current="true">语料目录</button>
+              <button>嵌入模型</button>
+              <button>召回策略</button>
+              <button>判官重排</button>
+              <button>日记模板</button>
+            </nav>
+
+            <div>
+              <div class="form-sec">
+                <h3>语料目录</h3>
+                <p class="hint">它只读这些目录下的 Markdown。子目录会自动递归，隐藏目录跳过。</p>
+
+                <div class="field">
+                  <label for="dir">日记根目录</label>
+                  <span class="desc">指向放日记的那一层，不要指到单个文件。</span>
+                  <input type="text" id="dir" value="D:/Diary">
+                </div>
+
+                <div class="field-row">
+                  <div class="field">
+                    <label for="depth">递归层数</label>
+                    <input type="number" id="depth" value="3">
+                  </div>
+                  <div class="field">
+                    <label for="ext">文件类型</label>
+                    <select id="ext">
+                      <option>.md（推荐）</option>
+                      <option>.md, .txt</option>
+                      <option>全部文本</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-sec">
+                <h3>嵌入模型</h3>
+                <p class="hint">换模型之后必须重建索引，否则新旧向量不在同一个空间里，打分没有意义。</p>
+
+                <div class="field">
+                  <label for="ep">服务端点</label>
+                  <input type="text" id="ep" value="http://127.0.0.1:3017/v1">
+                </div>
+
+                <div class="field-row">
+                  <div class="field">
+                    <label for="model">模型</label>
+                    <select id="model">
+                      <option>jina-embeddings-v3</option>
+                      <option>bge-m3</option>
+                      <option>text-embedding-3-small</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="dim">维数</label>
+                    <input type="number" id="dim" value="1024">
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label for="key">密钥</label>
+                  <span class="desc">留空表示端点不需要鉴权。已保存的密钥会以掩码显示。</span>
+                  <input type="password" id="key" value="sk-xxxxxxxxxxxxxxxx">
+                </div>
+              </div>
+
+              <div class="form-sec">
+                <h3>召回策略</h3>
+                <p class="hint">两路打分按权重融合。词法偏高适合专有名词多的记录，语义偏高适合长句和口语化表达。</p>
+
+                <div class="field">
+                  <label for="topk">返回上限</label>
+                  <input type="number" id="topk" value="8">
+                </div>
+
+                <div class="switch-row">
+                  <span class="sw-lab">跨目录去重（同一篇只返回最强的一块）</span>
+                  <label class="switch"><input type="checkbox" checked aria-label="跨目录去重"></label>
+                </div>
+                <div class="switch-row">
+                  <span class="sw-lab">判官重排</span>
+                  <label class="switch"><input type="checkbox" checked aria-label="判官重排"></label>
+                </div>
+              </div>
+
+              <div class="savebar">
+                <span class="saved">6 项已生效 · 无未保存改动</span>
+                <button class="btn">重置</button>
+                <button class="btn btn-primary">保存</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function () {
+  var app = document.getElementById('app')
+  var navs = Array.prototype.slice.call(document.querySelectorAll('.nav-item'))
+  var pages = Array.prototype.slice.call(document.querySelectorAll('.page'))
+  var main = document.querySelector('.main')
+
+  function go(name) {
+    navs.forEach(function (b) {
+      if (b.getAttribute('data-go') === name) b.setAttribute('aria-current', 'page')
+      else b.removeAttribute('aria-current')
+    })
+    pages.forEach(function (p) {
+      if (p.getAttribute('data-page') === name) p.setAttribute('data-active', 'true')
+      else p.removeAttribute('data-active')
+    })
+    if (main) main.scrollTop = 0
+  }
+
+  navs.forEach(function (b) {
+    b.addEventListener('click', function () { go(b.getAttribute('data-go')) })
+  })
+
+  // 记忆行展开
+  Array.prototype.slice.call(document.querySelectorAll('.mem')).forEach(function (row) {
+    row.addEventListener('click', function (ev) {
+      if (ev.target.closest('button')) return
+      row.setAttribute('data-open', row.getAttribute('data-open') === '1' ? '0' : '1')
+    })
+  })
+
+  // 权重联动
+  var ranges = Array.prototype.slice.call(document.querySelectorAll('.slider-row input[type=range]'))
+  var wLex = document.getElementById('wLex')
+  var wSem = document.getElementById('wSem')
+  if (ranges.length >= 2 && wLex && wSem) {
+    ranges[0].addEventListener('input', function () {
+      var v = Number(this.value) / 100
+      wLex.textContent = v.toFixed(2)
+      wSem.textContent = (1 - v).toFixed(2)
+      ranges[1].value = String(Math.round((1 - v) * 100))
+    })
+    ranges[1].addEventListener('input', function () {
+      var v = Number(this.value) / 100
+      wSem.textContent = v.toFixed(2)
+      wLex.textContent = (1 - v).toFixed(2)
+      ranges[0].value = String(Math.round((1 - v) * 100))
+    })
+  }
+
+  // 设置子导航
+  Array.prototype.slice.call(document.querySelectorAll('.set-nav button')).forEach(function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.slice.call(document.querySelectorAll('.set-nav button')).forEach(function (x) {
+        x.removeAttribute('aria-current')
+      })
+      b.setAttribute('aria-current', 'true')
+    })
+  })
+
+  // 主题
+  function toggleTheme() {
+    var html = document.documentElement
+    var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'
+    html.setAttribute('data-theme', next)
+    var label = next === 'dark' ? '浅色' : '深色'
+    var railBtn = document.querySelector('#railTheme span')
+    var demoBtn = document.getElementById('themeBtn')
+    if (railBtn) railBtn.textContent = label
+    if (demoBtn) demoBtn.textContent = label
+  }
+  var rt = document.getElementById('railTheme')
+  var tb = document.getElementById('themeBtn')
+  if (rt) rt.addEventListener('click', toggleTheme)
+  if (tb) tb.addEventListener('click', toggleTheme)
+
+  // 宽度切换（模拟拖拽后的重排）
+  Array.prototype.slice.call(document.querySelectorAll('.demo-group [data-w]')).forEach(function (b) {
+    b.addEventListener('click', function () {
+      var w = b.getAttribute('data-w')
+      app.style.setProperty('--demo-w', w + 'px')
+      Array.prototype.slice.call(document.querySelectorAll('.demo-group [data-w]')).forEach(function (x) {
+        x.setAttribute('aria-pressed', x === b ? 'true' : 'false')
+      })
+    })
+  })
+
+  // 键盘 1-4
+  window.addEventListener('keydown', function (ev) {
+    var t = ev.target.tagName
+    if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return
+    var map = { '1': 'lib', '2': 'recall', '3': 'index', '4': 'settings' }
+    if (map[ev.key]) go(map[ev.key])
+  })
+})()
+</script>
+</body>
+</html>
