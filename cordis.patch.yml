@@ -177,9 +177,16 @@
         # ---- 通道 2：长文档动态注入 ----
         inject:
           enabled: true
-          # 注入位置：'context'（system prompt，尾部追加）| 'message'（对话消息）
-          mode: context
-          maxMessages: 3
+          # 注入位置：'message'（对话消息，默认）| 'context'（system prompt 尾部）
+          #
+          # 默认走 message 是因为召回内容**会变**（发新消息 / 勾 todo 都重新召回）。
+          # 放在 system 尾部的话，它一变 system 消息就变了，而 system 在整个请求
+          # 最前面 —— 前缀缓存从那里断开，后面整段对话历史都要重新计算。
+          # 放消息流里则只是多算召回块本身，而这块本来就要算。
+          mode: message
+          # 0 = 不限制。有条目级去重兜底（同一条记忆不会重复注入），
+          # 不必再用条数上限卡着；填 >0 仅供想严格控制历史长度时使用。
+          maxMessages: 0
           order: 125
           # 召回块外层标签名
           blockName: vcprag-recall

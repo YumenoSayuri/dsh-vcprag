@@ -309,7 +309,9 @@ window.__ModuleLoader__.load({
        */
       function injectModePicker(opts) {
         var value = opts.value === 'message' ? 'message' : (opts.defaultMode || 'prompt')
-        // 统一归一化：runtime 默认 section、inject 默认 context，UI 上都叫「system prompt」
+        // 统一归一化：两条通道都叫「系统提示词 / 对话消息」两种位置，
+        // 但值不同 —— runtime 的 system 位置是 'section'，inject 的是 'context'。
+        // 默认值各自不同（runtime=section、inject=message），由调用方的 systemValue 决定。
         var isMessage = opts.value === 'message'
         var hasCap = opts.maxMessages !== undefined && opts.maxMessages !== null
         return h('div', { style: { marginBottom: 10 } },
@@ -1095,8 +1097,9 @@ window.__ModuleLoader__.load({
           systemValue: 'context',
           maxMessages: d.inject.maxMessages,
           capKey: 'inject',
-          help: '默认进 system prompt（尾部追加，被冻结机制压制）。若上游会清空 system prompt，'
-            + '切到「对话消息」以保证召回内容仍能送达模型。',
+          help: '默认进「对话消息」（插在你这次发言之后）。召回内容是会变的，'
+            + '放在消息流里变化不影响 system 消息，也就不会连累后面的对话历史重算 —— '
+            + '这是缓存最优的一档。「系统提示词」只在你的上游必须把所有内容塞进 system 时才选。',
           onChange: function (v) { patch('inject.mode', v) },
           onMaxMessages: function (n) { patch('inject.maxMessages', n) },
         }),
