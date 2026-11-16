@@ -233,6 +233,9 @@ window.__ModuleLoader__.load({
         // 语义写自检：贴进来的正文 + 解析结果
         previewText: '',
         preview: null,
+        // 当前分区（设置页左导航）+ 是否有未保存改动（底部 savebar 用）
+        sectionId: 'embed',
+        dirty: false,
       })
       var s = st[0]
       var set = st[1]
@@ -402,7 +405,9 @@ window.__ModuleLoader__.load({
           target = target[parts[i]]
         }
         target[parts[parts.length - 1]] = value
-        merge({ draft: next })
+        // 任何一次字段改动都置脏。savebar 靠它决定说「无未保存改动」
+        // 还是「有未保存的改动」—— 这比让用户自己记要可靠。
+        merge({ draft: next, dirty: true })
       }
 
       function save(force) {
@@ -425,6 +430,8 @@ window.__ModuleLoader__.load({
             merge({
               msg: '已保存' + (r.warning ? '（' + r.warning + '）' : ''),
               data: Object.assign({}, s.data, { config: r.config }),
+              // 保存成功 = 磁盘与草稿一致，脏标记清掉。
+              dirty: false,
             })
             setTimeout(function () { merge({ msg: null }) }, 5000)
           } else {
@@ -1350,32 +1357,66 @@ window.__ModuleLoader__.load({
           : null
       )
 
-      // ---- 底部保存栏 ----
-      var footer = h('div', {
-        style: {
-          position: 'sticky',
-          bottom: 0,
-          background: TOKEN.surface,
-          borderTop: '0.5px solid ' + TOKEN.border,
-          padding: '10px 0',
-          marginTop: 4,
-          display: 'flex',
-          gap: 10,
-          alignItems: 'center',
-        },
-      },
-        h('button', { style: S.button(true), onClick: function () { save(false) } }, '保存配置'),
-        h('button', { style: S.button(false), onClick: load }, '重新加载'),
-        h('button', {
-          style: S.button(false),
-          onClick: function () { merge({ draft: JSON.parse(JSON.stringify(s.data.defaults)) }) },
-        }, '恢复默认值'),
-        s.msg ? h('span', { style: { fontSize: 12, color: TOKEN.brand } }, s.msg) : null
-      )
+      // ---- 分区 ----
+      //
+      // 卡片原来是十张一路往下滚，找个「判官超时」要翻半天。这里按
+      // **它影响什么** 归成五段，左边给一排锚点。分类原则：
+      //   语料目录   它去哪里找东西
+      //   嵌入模型   向量怎么算（换它必须重建索引）
+      //   召回策略   怎么排序、怎么过滤、注入到哪
+      //   判官重排   可选的第二道裁判
+      //   日记与写作 它写出去的东西长什么样
+      //
+      // 每段是 {id, label, cards[]}，渲染时只显示当前段 —— 不隐藏而是
+      // 不渲染，避免十张卡片同时挂载时那些受控输入互相干扰。
+      // 卡片与分区的对应关系按**卡片自己的标题**来，别凭名字猜：
+      //   channelCard  = 「A. Embedding 渠道」  → 嵌入模型
+      //   recallCard   = 「B. 召回参数」（判官是它内部子块）→ 召回策略
+      //   freezeCard   = 「C. 冻结行为」        → 召回策略
+      //   runtimeCard  = 「D. runtime 记忆」    → 常驻注入
+      //   aliasCard    = 「E. 同义词别名表」    → 召回策略（它影响分词）
+      //   diaryCard    = 「F. 日记存放」        → 日记
+      //   injectCard   = 「G. 注入文案与占位符」→ 召回策略
+      //   templateCard = 「H. 日记写作规范」    → 日记
+      //   semanticCard = 「I. 语义写入」        → 日记
+      //
+      // 语料目录（corpusRoot / diaryRoot / 递归层数 / 文件类型）目前没有
+      // 独立卡片 —— 它散在 A 和 F 里。所以这一段直接复用 channelCard 的
+      // 目录部分不现实，改为把 A/F 都放进来更诚实：用户要找路径就在这两段。
+      // runtimeCard 和 injectCard 放在同一段是有意的：两者的「注入位置 +
+      // 保留几条」是同一组语义（常驻记忆 vs 动态召回），用户调其中一个
+      // 时几乎必然要看另一个。拆到两段里等于逼他来回切。
+      var SECTIONS = [
+        { id: 'embed', label: '嵌入模型', cards: [channelCard] },
+        { id: 'recall', label: '召回与注入', cards: [recallCard, freezeCard, runtimeCard, injectCard, aliasCard] },
+        { id: 'diary', label: '日记与写作', cards: [diaryCard, templateCard, semanticCard] },
+      ]
+      var activeId = s.sectionId || 'embed'
+      var activeSection = SECTIONS.filter(function (x) { return x.id === activeId })[0] || SECTIONS[0]
 
-      var body = h('div', null,
-        channelCard, recallCard, freezeCard, diaryCard, semanticCard, injectCard,
-        runtimeCard, aliasCard, templateCard, footer)
+      var setNav = h('nav', { className: 'vcp-setnav', 'aria-label': '设置分区' },
+        SECTIONS.map(function (x) {
+          return h('button', {
+            key: x.id,
+            type: 'button',
+            'aria-current': x.id === activeSection.id ? 'true' : undefined,
+            onClick: function () { merge({ sectionId: x.id }) },
+          }, x.label)
+        }))
+
+      // ---- 底部保存栏 ----
+      var dirty = s.dirty === true
+      var footer = h('div', { className: 'vcp-savebar' },
+        h('span', { className: 'saved', 'data-dirty': dirty ? '1' : undefined },
+          dirty ? '有未保存的改动' : (s.msg || '无未保存改动')),
+        h('button', { style: S.button(false), onClick: load }, '重置'),
+        h('button', { style: S.button(true), onClick: function () { save(false) } }, '保存'))
+
+      var body = h('div', { className: 'vcp-set' },
+        setNav,
+        h('div', null,
+          activeSection.cards,
+          footer))
 
       if (s.dialog === null) return body
 
@@ -1395,7 +1436,11 @@ window.__ModuleLoader__.load({
     // 会挤成两条窄缝，所以改成单栏行列表：点一行原地展开，不跳转、不分栏。
 
     function LibraryPage() {
-      var state = React.useState({ rows: [], total: 0, q: '', open: null, doc: null, editing: false, draft: '', msg: null })
+      var state = React.useState({
+        rows: [], total: 0, sources: [], q: '',
+        open: null, doc: null, editing: false, draft: '', msg: null,
+        confirmDel: null,
+      })
       var s = state[0]
       var set = state[1]
 
@@ -1405,7 +1450,7 @@ window.__ModuleLoader__.load({
 
       var load = React.useCallback(function (q) {
         get('/library', { q: q }).then(function (r) {
-          if (r.ok) merge({ rows: r.rows, total: r.total })
+          if (r.ok) merge({ rows: r.rows, total: r.total, sources: r.sources || [] })
         })
       }, [])
 
@@ -1438,6 +1483,73 @@ window.__ModuleLoader__.load({
         })
       }
 
+      /**
+       * 删除一篇日记。
+       *
+       * 两步确认走的是原生 window.confirm 而不是自绘弹窗 —— 这个动作
+       * 不可逆，弹窗被误关/被样式搞坏都比「多问一句」代价大。
+       */
+      function removeDoc(row) {
+        var ok = window.confirm(
+          '删除这篇日记？\n\n' + (row.title || row.filename)
+          + '\n\n文件会被删掉，索引也会同步摘掉（' + row.chunks + ' 块）。此操作不可撤销。'
+        )
+        if (!ok) return
+        merge({ msg: '删除中…' })
+        post('/document/delete', { docId: row.docId }).then(function (r) {
+          if (!r.ok) {
+            merge({ msg: '删除失败：' + (r.error || '未知错误') })
+            return
+          }
+          merge({
+            msg: r.warning ? r.warning : ('已删除，索引同步摘掉 ' + ((r.index && r.index.chunkCount) || 0) + ' 块'),
+            open: null, doc: null, editing: false,
+          })
+          load(s.q)
+        })
+      }
+
+      /** 重新扫描目录：等价于一次全量重建，走索引页那条端点。 */
+      function rescan() {
+        merge({ msg: '正在重新扫描…' })
+        post('/index/rebuild', { force: false }).then(function (r) {
+          if (r.requiresConfirm) {
+            var go = window.confirm((r.message || '索引配置不兼容') + '\n\n仍然重建？')
+            if (!go) { merge({ msg: null }); return }
+            post('/index/rebuild', { force: true }).then(function (r2) {
+              merge({ msg: r2.ok ? '已开始重建，去索引页看进度' : ('重建失败：' + (r2.error || '未知')) })
+            })
+            return
+          }
+          merge({ msg: r.ok ? '已开始重建，去索引页看进度' : ('重建失败：' + (r.error || '未知')) })
+          if (r.ok) load(s.q)
+        })
+      }
+
+      /** 导出：把当前列表拼成一段 Markdown 让浏览器存盘。 */
+      function exportList() {
+        if (s.rows.length === 0) { merge({ msg: '没有可导出的条目' }); return }
+        var lines = ['# 记忆库导出', '', '共 ' + s.rows.length + ' 条', '']
+        s.rows.forEach(function (row) {
+          lines.push('## ' + (row.title || row.filename))
+          lines.push('')
+          lines.push('- 日期：' + (row.date || '无'))
+          lines.push('- 文件：' + row.filename)
+          lines.push('- 分块：' + row.chunks)
+          lines.push('')
+        })
+        var blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+        var url = URL.createObjectURL(blob)
+        var a = document.createElement('a')
+        a.href = url
+        a.download = 'vcprag-记忆库-' + new Date().toISOString().slice(0, 10) + '.md'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        merge({ msg: '已导出 ' + s.rows.length + ' 条' })
+      }
+
       var rows = s.rows.map(function (row) {
         var isOpen = s.open === row.docId
         var doc = isOpen ? s.doc : null
@@ -1468,6 +1580,14 @@ window.__ModuleLoader__.load({
                     onClick: function (e) { e.stopPropagation(); save() },
                   }, '保存并重建该篇索引')
                   : null,
+                // 只有 .txt 日记给删除入口。语料目录里的 .md 属于别的工具，
+                // 面板不该越界去删（端点也拦着，这里只是不显示）。
+                row.deletable === true
+                  ? h('button', {
+                    className: 'vcp-btn danger',
+                    onClick: function (e) { e.stopPropagation(); removeDoc(row) },
+                  }, '删除')
+                  : null,
                 s.msg ? h('span', {
                   style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' },
                 }, s.msg) : null)))
@@ -1490,12 +1610,30 @@ window.__ModuleLoader__.load({
           more)
       })
 
+      // 来源分布：按日期月份聚合块数，条形长度按最大那一项归一。
+      // 一条都没有时不画空条 —— 那看着像坏了。
+      var maxCount = 0
+      s.sources.forEach(function (row) { if (row.count > maxCount) maxCount = row.count })
+      var sourceCard = h('div', { className: 'vcp-card' },
+        h('p', { className: 'vcp-card-t' }, '来源分布'),
+        s.sources.length === 0
+          ? h('p', { style: { margin: 0, fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' } }, '索引里还没有内容。')
+          : s.sources.map(function (row) {
+            return h('div', { className: 'vcp-bar', key: row.label },
+              h('div', { className: 'vcp-bar-lab' },
+                h('span', null, row.label),
+                h('b', null, String(row.count))),
+              h('div', { className: 'vcp-track' },
+                h('i', { style: { width: Math.max(3, Math.round((row.count / maxCount) * 100)) + '%' } })))
+          }))
+
       var sides = h('aside', null,
         h('div', { className: 'vcp-card' },
           h('p', { className: 'vcp-card-t' }, '语料概况'),
           h('div', { className: 'vcp-kv' }, h('span', null, '匹配'), h('b', null, s.rows.length + ' 篇')),
           h('div', { className: 'vcp-kv' }, h('span', null, '全部'), h('b', null, s.total + ' 篇')),
-          h('div', { className: 'vcp-kv' }, h('span', null, '展开'), h('b', null, s.open === null ? '—' : '1 篇'))))
+          h('div', { className: 'vcp-kv' }, h('span', null, '展开'), h('b', null, s.open === null ? '—' : '1 篇'))),
+        sourceCard)
 
       return h('div', null,
         h(PageHead, {
@@ -1515,6 +1653,14 @@ window.__ModuleLoader__.load({
                 load(q)
               },
             }),
+            h('button', { key: 'rescan', className: 'vcp-btn', onClick: rescan }, '重新扫描目录'),
+            h('button', { key: 'export', className: 'vcp-btn', onClick: exportList }, '导出'),
+            s.msg
+              ? h('span', {
+                key: 'msg',
+                style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: '1 1 100%' },
+              }, s.msg)
+              : null,
           ],
         }),
         h('div', { className: 'vcp-cols' },
@@ -1684,6 +1830,27 @@ window.__ModuleLoader__.load({
         })
       }
 
+      /**
+       * 对账清理：摘掉索引里磁盘上已不存在的文档。
+       *
+       * 和「重建索引」的区别要说清楚 —— 重建要重算全部嵌入（几分钟），
+       * 对账只做差集（几秒），所以它是个日常按钮而不是危险操作。
+       */
+      function prune() {
+        merge({ busy: true })
+        post('/index/prune', {}).then(function (r) {
+          merge({ busy: false })
+          if (!r.ok) { window.alert('对账失败：' + (r.error || '未知')); return }
+          var n = (r.removed || []).length
+          window.alert(
+            n === 0
+              ? '对账完成：索引与磁盘一致（' + r.live + ' 篇），没有需要清理的条目。'
+              : '对账完成：摘掉 ' + n + ' 篇幽灵文档、' + r.chunkCount + ' 块、' + r.vectorCount + ' 条向量。'
+          )
+          loadOnce()
+        })
+      }
+
       if (s.state === null) {
         return h('div', null,
           h(PageHead, { eyebrow: '索引', title: '索引' }),
@@ -1787,6 +1954,10 @@ window.__ModuleLoader__.load({
               key: 'v', className: 'vcp-btn',
               onClick: verify, disabled: s.busy || building,
             }, '校验一致性'),
+            h('button', {
+              key: 'p', className: 'vcp-btn',
+              onClick: prune, disabled: s.busy || building,
+            }, '对账清理'),
             h('button', { key: 'f', className: 'vcp-btn quiet', onClick: loadOnce }, '刷新'),
           ],
         }),
@@ -1823,13 +1994,17 @@ window.__ModuleLoader__.load({
     function cssText() {
       return [
         // 只负责当容器查询的参照物。宽度/高度必须钉死，否则它会跟着内容长。
-        '.vcp-app{container-type:inline-size;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13.5px;line-height:1.75;box-sizing:border-box}',
+        // 字体栈：设计稿用衬线做标题、等宽做数字。这里不写死具体字体名，
+        // 而是给一串联级 —— 用户机器上有哪个就用哪个，全都没有就落回系统
+        // 无衬线，不会出现「装了这个插件文字变成方块」。
+        // 只影响 .vcp-app 内部，不外溢到宿主其它界面。
+        '.vcp-app{container-type:inline-size;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13.5px;line-height:1.75;box-sizing:border-box;--vcp-serif:"Source Han Serif SC","Noto Serif SC","Songti SC",SimSun,Georgia,serif;--vcp-mono:"JetBrains Mono","Cascadia Mono",Consolas,ui-monospace,monospace}',
         // 真正的网格。容器查询的规则全部落在这一层 —— 它是 .vcp-app 的后代。
         '.vcp-split{display:grid;grid-template-columns:236px minmax(0,1fr);height:100%;min-height:0;width:100%;overflow:hidden}',
         '.vcp-rail{display:flex;flex-direction:column;min-width:0;padding:26px 12px 14px;background:var(--dsw-alias-bg-layer-1);border-right:.5px solid var(--dsw-alias-border-l3)}',
         '.vcp-brand{padding:0 10px 24px;min-width:0}',
-        '.vcp-brand h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.05em;line-height:1.4}',
-        '.vcp-brand p{margin:5px 0 0;font-size:10px;letter-spacing:.1em;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-brand h1{margin:0;font-family:var(--vcp-serif);font-size:16px;font-weight:600;letter-spacing:.055em;line-height:1.4}',
+        '.vcp-brand p{margin:5px 0 0;font-family:var(--vcp-mono);font-size:10px;letter-spacing:.1em;color:var(--dsw-alias-label-tertiary)}',
         '.vcp-nav{display:flex;flex-direction:column;gap:2px}',
         '.vcp-item{display:flex;align-items:center;gap:11px;padding:10px 11px;border:0;border-radius:6px;background:none;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;text-align:left;cursor:pointer;min-width:0;transition:background .11s ease,color .11s ease}',
         '.vcp-item:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
@@ -1838,17 +2013,17 @@ window.__ModuleLoader__.load({
         '.vcp-item svg{flex:0 0 16px;width:16px;height:16px;opacity:.75}',
         '.vcp-item[aria-current="page"] svg{opacity:1;color:var(--dsw-alias-brand-primary)}',
         '.vcp-item .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.vcp-item .num{margin-left:auto;font-size:10px;font-weight:400;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-item .num{margin-left:auto;font-family:var(--vcp-mono);font-size:10px;font-weight:400;color:var(--dsw-alias-label-tertiary)}',
         '.vcp-foot{margin-top:auto;padding-top:13px;border-top:.5px solid var(--dsw-alias-border-l3)}',
-        '.vcp-status{font-size:10px;line-height:1.95;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden}',
+        '.vcp-status{font-family:var(--vcp-mono);font-size:10px;line-height:1.95;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden}',
         '.vcp-status b{font-weight:400;color:var(--dsw-alias-state-success-primary)}',
         '.vcp-main{overflow-y:auto;overflow-x:hidden;min-width:0;height:100%}',
         '.vcp-wrap{max-width:1020px;margin:0 auto;padding:42px 46px 88px}',
         '.vcp-page{display:none}',
         '.vcp-page[data-active="true"]{display:block}',
         '.vcp-he{margin:0 0 40px;max-width:72ch}',
-        '.vcp-eb{margin:0 0 11px;font-size:10px;letter-spacing:.19em;text-transform:uppercase;color:var(--dsw-alias-brand-primary)}',
-        '.vcp-he h2{margin:0;font-size:28px;font-weight:600;letter-spacing:-.005em;line-height:1.32}',
+        '.vcp-eb{margin:0 0 11px;font-family:var(--vcp-mono);font-size:10px;letter-spacing:.19em;text-transform:uppercase;color:var(--dsw-alias-brand-primary)}',
+        '.vcp-he h2{margin:0;font-family:var(--vcp-serif);font-size:28px;font-weight:600;letter-spacing:-.005em;line-height:1.32}',
         '.vcp-he .vcp-sub{margin:13px 0 0;font-size:13px;line-height:1.85;color:var(--dsw-alias-label-secondary)}',
         '.vcp-acts{margin-top:22px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}',
         '.vcp-btn{font:inherit;font-size:12.5px;line-height:1;padding:9px 16px;cursor:pointer;border-radius:6px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
@@ -1858,6 +2033,9 @@ window.__ModuleLoader__.load({
         '.vcp-btn.pri{background:var(--dsw-alias-brand-primary);border-color:transparent;color:var(--dsw-alias-label-inverse,#fff);font-weight:600}',
         '.vcp-btn.quiet{background:none;border-color:transparent;color:var(--dsw-alias-label-secondary);padding:9px 10px}',
         '.vcp-btn.quiet:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+        // 危险操作。只在删除这类不可逆的地方用 —— 满屏红按钮等于没有重点。
+        '.vcp-btn.danger{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}',
+        '.vcp-btn.danger:hover{background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-inverse,#fff)}',
         '.vcp-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:40px;align-items:start}',
         '.vcp-sect{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 16px}',
         '.vcp-sect h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.02em}',
@@ -1868,7 +2046,7 @@ window.__ModuleLoader__.load({
         '.vcp-bar{margin-bottom:14px}',
         '.vcp-bar:last-child{margin-bottom:0}',
         '.vcp-bar-lab{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;color:var(--dsw-alias-label-secondary);margin-bottom:6px}',
-        '.vcp-bar-lab b{font-size:10.5px;font-weight:400;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
+        '.vcp-bar-lab b{font-family:var(--vcp-mono);font-size:10.5px;font-weight:400;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
         '.vcp-track{height:5px;border-radius:3px;overflow:hidden;background:var(--dsw-alias-bg-layer-2)}',
         '.vcp-track i{display:block;height:100%;border-radius:3px;background:var(--dsw-alias-brand-primary)}',
         '.vcp-kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;font-size:12px;border-bottom:.5px solid var(--dsw-alias-border-l3)}',
@@ -1879,9 +2057,9 @@ window.__ModuleLoader__.load({
         '.vcp-mem:first-of-type{border-top:.5px solid var(--dsw-alias-border-l3)}',
         '.vcp-mem-h{display:flex;align-items:baseline;gap:12px}',
         '.vcp-mem-h h4{margin:0;font-size:13.5px;font-weight:600;line-height:1.55;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-        '.vcp-mem-h time{margin-left:auto;flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
+        '.vcp-mem-h time{margin-left:auto;flex:0 0 auto;font-family:var(--vcp-mono);font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
         '.vcp-mem-ex{margin:8px 0 0;font-size:12.5px;line-height:1.85;max-width:72ch;color:var(--dsw-alias-label-secondary)}',
-        '.vcp-mem-meta{margin:10px 0 0;display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-mem-meta{margin:10px 0 0;display:flex;gap:16px;flex-wrap:wrap;font-family:var(--vcp-mono);font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
         '.vcp-mem-more{display:none}',
         '.vcp-mem[data-open="1"] .vcp-mem-more{display:block;margin-top:15px}',
         '.vcp-mem[data-open="1"] .vcp-mem-h h4{color:var(--dsw-alias-brand-primary);white-space:normal}',
@@ -1895,15 +2073,15 @@ window.__ModuleLoader__.load({
         '.vcp-hit{padding:18px 0;border-bottom:.5px solid var(--dsw-alias-border-l3)}',
         '.vcp-hit:first-of-type{border-top:.5px solid var(--dsw-alias-border-l3)}',
         '.vcp-hit-top{display:flex;align-items:baseline;gap:11px}',
-        '.vcp-rank{flex:0 0 16px;font-size:10.5px;color:var(--dsw-alias-brand-primary)}',
+        '.vcp-rank{flex:0 0 16px;font-family:var(--vcp-mono);font-size:10.5px;color:var(--dsw-alias-brand-primary)}',
         '.vcp-hit-top h4{margin:0;font-size:13px;font-weight:600;min-width:0}',
-        '.vcp-score{margin-left:auto;flex:0 0 auto;font-size:12px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}',
+        '.vcp-score{margin-left:auto;flex:0 0 auto;font-family:var(--vcp-mono);font-size:12px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}',
         '.vcp-hit p{margin:7px 0 0 27px;font-size:12.5px;line-height:1.85;max-width:68ch;color:var(--dsw-alias-label-secondary)}',
-        '.vcp-scores{margin:9px 0 0 27px;display:flex;gap:18px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+        '.vcp-scores{margin:9px 0 0 27px;display:flex;gap:18px;flex-wrap:wrap;font-family:var(--vcp-mono);font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
         '.vcp-scores em{font-style:normal;color:var(--dsw-alias-label-secondary)}',
         '.vcp-band{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--dsw-alias-border-l3);border:.5px solid var(--dsw-alias-border-l2);border-radius:10px;overflow:hidden;margin:0 0 38px}',
         '.vcp-stat{background:var(--dsw-alias-bg-layer-1);padding:20px 18px;min-width:0}',
-        '.vcp-stat b{display:block;font-size:25px;font-weight:600;letter-spacing:-.025em;line-height:1.15;font-variant-numeric:tabular-nums}',
+        '.vcp-stat b{display:block;font-family:var(--vcp-mono);font-size:25px;font-weight:600;letter-spacing:-.025em;line-height:1.15;font-variant-numeric:tabular-nums}',
         '.vcp-stat span{display:block;margin-top:7px;font-size:11px;color:var(--dsw-alias-label-tertiary)}',
         '.vcp-stat .tag{display:inline-block;margin-top:9px;padding:2px 8px;border-radius:20px;font-size:10px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-success-primary)}',
         '.vcp-dir{padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l3);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}',
@@ -1912,6 +2090,22 @@ window.__ModuleLoader__.load({
         '.vcp-dir .pt{font-size:10.5px;color:var(--dsw-alias-label-tertiary);word-break:break-all}',
         '.vcp-dir .n1{font-size:11px;margin-left:auto;color:var(--dsw-alias-label-secondary)}',
         '.vcp-dir .n2{font-size:11px;min-width:52px;text-align:right;color:var(--dsw-alias-label-tertiary)}',
+        // ---- 设置页：左侧分区导航 + 底部保存栏 ----
+        //
+        // 设计稿里这块是 `.set-layout` 两栏。**不能用固定像素栅格**：
+        // 面板宽度由宿主拖拽决定（300 ~ 视口*0.7），写死宽度必然在
+        // 某个档位把输入框挤变形 —— 那正是旧版踩过的坑。
+        // 这里用 minmax + 容器查询兜：宽了并排，窄了自动堆成一栏。
+        '.vcp-set{display:grid;grid-template-columns:minmax(0,1fr);gap:0}',
+        '.vcp-setnav{display:flex;gap:6px;overflow-x:auto;padding:0 0 14px;margin:0 0 22px;border-bottom:.5px solid var(--dsw-alias-border-l3);scrollbar-width:none}',
+        '.vcp-setnav::-webkit-scrollbar{display:none}',
+        '.vcp-setnav button{flex:0 0 auto;font:inherit;font-size:12px;padding:7px 13px;border-radius:20px;border:.5px solid transparent;background:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;white-space:nowrap}',
+        '.vcp-setnav button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+        '.vcp-setnav button[aria-current="true"]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600}',
+        '.vcp-setnav button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}',
+        '.vcp-savebar{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0;margin-top:8px;background:var(--dsw-alias-bg-base);border-top:.5px solid var(--dsw-alias-border-l3)}',
+        '.vcp-savebar .saved{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-right:auto}',
+        '.vcp-savebar .saved[data-dirty="1"]{color:var(--dsw-alias-state-warning-primary)}',
         '.vcp-form{margin:0 0 40px}',
         '.vcp-form > h3{margin:0 0 7px;font-size:14px;font-weight:600}',
         '.vcp-form > .hint{margin:0 0 22px;font-size:12px;line-height:1.8;max-width:66ch;color:var(--dsw-alias-label-tertiary)}',
@@ -1930,7 +2124,9 @@ window.__ModuleLoader__.load({
         '@container (max-width:419px){.vcp-split{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.vcp-rail{flex-direction:row;align-items:center;gap:2px;padding:7px 8px;border-right:0;border-bottom:.5px solid var(--dsw-alias-border-l3);overflow-x:auto}.vcp-nav{flex-direction:row;gap:2px;flex:0 0 auto}.vcp-item{padding:7px 9px;width:auto;gap:6px}.vcp-item .lbl{display:inline;font-size:12px}.vcp-wrap{padding:22px 14px 60px}.vcp-he h2{font-size:20px}.vcp-he{margin-bottom:24px}.vcp-search{margin-bottom:24px}.vcp-search input{flex:1 1 100%}.vcp-search .vcp-btn{width:100%}.vcp-hit p,.vcp-scores{margin-left:0}.vcp-dir .pt{display:none}.vcp-cols{gap:28px}}',
         // 419-599：图标栏但页面留白收紧，正文继续让宽度。
         "@container (min-width:420px) and (max-width:599px){.vcp-wrap{padding:26px 18px 64px}.vcp-he h2{font-size:21px}.vcp-he{margin-bottom:26px}.vcp-search{margin-bottom:26px}.vcp-search input{flex:1 1 100%}.vcp-search .vcp-btn{width:100%}.vcp-hit p,.vcp-scores{margin-left:0}}",
-        '@container (min-width:1030px){.vcp-split{grid-template-columns:236px minmax(0,1fr)}.vcp-cols{grid-template-columns:minmax(0,1fr) 272px;gap:40px}.vcp-band{grid-template-columns:1.4fr 1fr 1fr 1fr}}',
+        // 设置页两栏只在「面板够宽」时出现。断点跟 .vcp-cols 同一档，
+        // 保证同一个面板宽度下四页的排版节奏一致。
+        '@container (min-width:1030px){.vcp-split{grid-template-columns:236px minmax(0,1fr)}.vcp-cols{grid-template-columns:minmax(0,1fr) 272px;gap:40px}.vcp-band{grid-template-columns:1.4fr 1fr 1fr 1fr}.vcp-set{grid-template-columns:150px minmax(0,1fr);gap:36px}.vcp-setnav{flex-direction:column;gap:2px;overflow:visible;position:sticky;top:0;padding:0 0 0 0;margin:0;border-bottom:0}.vcp-setnav button{text-align:left;border-radius:6px;padding:8px 11px;font-size:12.5px}}',
         '@container (min-width:1240px){.vcp-wrap{padding:48px 56px 100px;max-width:1080px}.vcp-he h2{font-size:31px}.vcp-mem{padding:23px 0}.vcp-he{max-width:none}}',
         '@media (prefers-reduced-motion:reduce){.vcp-item,.vcp-btn{transition:none}}',
       ].join('\n')
